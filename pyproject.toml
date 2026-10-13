@@ -1,0 +1,55 @@
+[tool.poetry]
+name = "llm-arena"
+version = "0.1.0"
+description = "LLM Arena for Developers: backend for evaluating and comparing LLMs"
+authors = []
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.12,<4.0"
+fastapi = "*"
+pydantic = "^2"
+pydantic-settings = "*"
+sqlalchemy = {version = "^2", extras = ["asyncio"]}
+asyncpg = "*"
+alembic = "*"
+taskiq = "*"
+taskiq-aio-pika = "*"
+uvicorn = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+pytest-asyncio = "*"
+httpx = "*"
+ruff = "*"
+black = "*"
+mypy = "*"
+pre-commit = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 80
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 80
+target-version = "py312"
+extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["api", "components", "tests"]
+explicit_package_bases = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = ["integration: needs running PostgreSQL/RabbitMQ"]
