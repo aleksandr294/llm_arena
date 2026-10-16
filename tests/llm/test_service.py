@@ -199,3 +199,11 @@ async def test_same_response_shape_across_providers(
     )
     assert type(a) is type(b) is LLMResponseSchema
     assert set(a.model_dump()) == set(b.model_dump())
+
+
+def test_ensure_provider_ready_checks_key_without_network() -> None:
+    LLMService(_settings()).ensure_provider_ready(ProviderName.OPENAI)
+    blank = LLMService(_settings(openai_api_key="  "))
+    with pytest.raises(ProviderNotConfiguredError) as exc:
+        blank.ensure_provider_ready(ProviderName.OPENAI)
+    assert "OPENAI_API_KEY" in str(exc.value)

@@ -68,6 +68,12 @@ class LLMService:
         self._providers[name] = provider
         return provider
 
+    def ensure_provider_ready(self, name: ProviderName) -> None:
+        """Raise ``ProviderNotConfiguredError`` (or
+        ``UnsupportedProviderError``) unless the provider can be used.
+        Makes no network call."""
+        self._get_provider(name)
+
     async def generate(
         self,
         target: ModelTargetSchema,
