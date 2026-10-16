@@ -3,11 +3,11 @@ import asyncio
 from alembic import context
 from sqlalchemy.engine import Connection
 
-from components.core.config import get_settings
-from components.core.database import Base, create_engine
-
 # Import every component's models module here so its tables are registered
 # on Base.metadata and visible to autogenerate.
+import components.datasets.models  # noqa: F401
+from components.core.config import get_settings
+from components.core.database import Base, create_engine
 
 config = context.config
 target_metadata = Base.metadata

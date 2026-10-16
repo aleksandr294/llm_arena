@@ -28,6 +28,35 @@ Health endpoints: `GET /api/v1/health/live` (process only) and
 
 The whole stack: `docker compose up --build`.
 
+## Datasets API
+
+A dataset is a named, ordered set of test cases. Test cases are append-only:
+each gets the next position (1, 2, ...) in its dataset. Content is stored and
+returned exactly as supplied.
+
+```bash
+# create a dataset (201); name is trimmed, description is optional
+curl -X POST localhost:8000/api/v1/datasets \
+    -H 'Content-Type: application/json' \
+    -d '{"name": "Capitals", "description": "Geography smoke test"}'
+
+# list (limit 1-100, default 50; offset >= 0) and get (includes case_count)
+curl 'localhost:8000/api/v1/datasets?limit=10&offset=0'
+curl localhost:8000/api/v1/datasets/<dataset_id>
+
+# add a test case (201); expected_output and metadata (object) are optional
+curl -X POST localhost:8000/api/v1/datasets/<dataset_id>/cases \
+    -H 'Content-Type: application/json' \
+    -d '{"input": "Capital of France?", "expected_output": "Paris",
+         "metadata": {"topic": "geo"}}'
+
+# list test cases ordered by position
+curl 'localhost:8000/api/v1/datasets/<dataset_id>/cases?limit=10'
+```
+
+List responses have the form `{items, total, limit, offset}`. Invalid input
+returns 422 naming the field; an unknown dataset returns 404.
+
 ## Migrations
 
 ```bash
