@@ -67,3 +67,15 @@ def test_provider_keys_optional_and_masked(monkeypatch: MonkeyPatch) -> None:
     assert "sk-test" not in rendered
     assert settings.openai_api_key is not None
     assert settings.openai_api_key.get_secret_value() == "sk-test-openai-secret"
+
+
+def test_llm_max_concurrency_default_and_minimum(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DB_URL)
+    monkeypatch.setenv("RABBITMQ_URL", MQ_URL)
+    monkeypatch.delenv("LLM_MAX_CONCURRENCY", raising=False)
+    assert SettingsSchema(_env_file=None).llm_max_concurrency == 4
+    monkeypatch.setenv("LLM_MAX_CONCURRENCY", "0")
+    with pytest.raises(ValidationError):
+        SettingsSchema(_env_file=None)

@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,9 @@ class SettingsSchema(BaseSettings):
 
     openai_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
+
+    # Max simultaneous model requests per provider in one worker process.
+    llm_max_concurrency: int = Field(default=4, ge=1)
 
 
 @lru_cache
