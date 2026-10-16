@@ -22,6 +22,9 @@ class SettingsSchema(BaseSettings):
     database_url: SecretStr
     rabbitmq_url: SecretStr
 
+    openai_api_key: SecretStr | None = None
+    anthropic_api_key: SecretStr | None = None
+
 
 @lru_cache
 def get_settings() -> SettingsSchema:
