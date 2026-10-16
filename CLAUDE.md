@@ -233,3 +233,21 @@ Report:
 - Database migrations and configuration changes.
 - Known limitations and remaining risks.
 - Git branch and pull request status.
+## Task tracking (Kan)
+
+Tasks live in a local Kan board (http://localhost:3000, board `llm-arena`, ID `tcutdspc0hup`).
+Start it with `docker compose -p kan --env-file .env.kan -f docker-compose.kan.yml up -d`.
+Use `scripts/kan.py` (reads `KAN_API_KEY` from the git-ignored `.env.kan`) instead of raw API calls:
+
+- `scripts/kan.py board` — list columns and cards
+- `scripts/kan.py create "Title" -d "Description" [-l LIST]` — new card (default list `Open`; others: `In-progress`, `Review`, `Done`)
+- `scripts/kan.py move CARD_ID LIST` — move a card between lists
+- `scripts/kan.py show CARD_ID` / `comment CARD_ID "text"`
+
+Board workflow:
+
+- When work on a task starts, move its card to `In-progress`.
+- When the reviewer agent has reviewed the task, move its card to `Review` (`scripts/kan.py move CARD_ID Review`) and comment with the review outcome.
+- Move the card to `Done` only after the pull request is merged by the user.
+
+Never print or commit the API key.
