@@ -44,11 +44,14 @@ logger = logging.getLogger(__name__)
 KIND_CONFIGURATION = "configuration"
 KIND_INTERNAL = "internal"
 JITTER_MAX_SECONDS = 0.5
+HOOK_TIMEOUT_SECONDS = 10.0
 # Column sizes of experiment_results; provider values are untrusted.
 FINISH_REASON_MAX = 64
 IDENTIFIER_MAX = 255
 
 Sleep = Callable[[float], Awaitable[None]]
+# Called with the result id after a succeeded outcome was stored.
+OnSucceeded = Callable[[uuid.UUID], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,7 @@ class ExperimentRunner:
         lease_seconds: int = LEASE_SECONDS,
         sleep: Sleep = asyncio.sleep,
         jitter: Callable[[], float] = _default_jitter,
+        on_succeeded: OnSucceeded | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least 1")
@@ -100,6 +104,7 @@ class ExperimentRunner:
         self._lease_seconds = lease_seconds
         self._sleep = sleep
         self._jitter = jitter
+        self._on_succeeded = on_succeeded
         # Process-local, one per provider; bounds requests, not backoff.
         self._semaphores: dict[str, asyncio.Semaphore] = {}
 
@@ -254,7 +259,7 @@ class ExperimentRunner:
         """Persist the outcome; if the database rejects it, store a generic
         failure so the result never stays running."""
         try:
-            await self._persist(result_id, work, outcome)
+            stored = await self._persist(result_id, work, outcome)
         except SQLAlchemyError:
             logger.error("result %s outcome write failed", result_id)
             fallback = self._failure(
@@ -263,13 +268,35 @@ class ExperimentRunner:
                 outcome.fields.get("attempts", work.attempts),
             )
             await self._persist(result_id, work, fallback)
+            return
+        if stored and outcome.status == ResultStatus.SUCCEEDED:
+            await self._notify_succeeded(result_id)
+
+    async def _notify_succeeded(self, result_id: uuid.UUID) -> None:
+        """Runs after the outcome transaction committed. A failing hook
+        (e.g. broker down) must never change the generation result; a
+        missed trigger is repaired by the evaluation backfill."""
+        if self._on_succeeded is None:
+            return
+        try:
+            await asyncio.wait_for(
+                self._on_succeeded(result_id), HOOK_TIMEOUT_SECONDS
+            )
+        except Exception as exc:  # includes the wait_for timeout
+            # Class name only: messages may carry content.
+            logger.warning(
+                "result %s post-generation hook failed (%s)",
+                result_id,
+                type(exc).__name__,
+            )
 
     async def _persist(
         self,
         result_id: uuid.UUID,
         work: _Work,
         outcome: _Outcome,
-    ) -> None:
+    ) -> bool:
+        """Returns whether the outcome was stored (False: stale write)."""
         async with self._factory() as session:
             experiments = ExperimentRepository(session)
             results = ExperimentResultRepository(session)
@@ -291,3 +318,4 @@ class ExperimentRunner:
             written,
             outcome.fields.get("error_kind"),
         )
+        return written

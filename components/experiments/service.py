@@ -128,7 +128,8 @@ class ExperimentService:
             dataset_id=data.dataset_id,
             prompt_template=data.prompt_template,
             config=data.config.model_dump(mode="json"),
-            evaluator_config=data.evaluator_config,
+            # Normalized dump: defaults are frozen with the experiment.
+            evaluator_config=data.evaluator_config.model_dump(mode="json"),
         )
         await self.experiments.add(experiment)
         await self.results.add_many(

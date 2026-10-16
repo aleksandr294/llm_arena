@@ -6,6 +6,7 @@ from sqlalchemy.engine import Connection
 # Import every component's models module here so its tables are registered
 # on Base.metadata and visible to autogenerate.
 import components.datasets.models  # noqa: F401
+import components.evaluation.models  # noqa: F401
 import components.experiments.models  # noqa: F401
 from components.core.config import get_settings
 from components.core.database import Base, create_engine

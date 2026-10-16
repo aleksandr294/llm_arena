@@ -92,7 +92,7 @@ async def test_create_returns_201_and_persists_pending(
     body = response.json()
     assert body["status"] == "pending"
     assert body["config"]["max_attempts"] == 3
-    assert body["evaluator_config"] == {}
+    assert body["evaluator_config"] == {"evaluators": []}
     assert enqueued.flat == []  # creating never enqueues
 
     got = (await client.get(f"{URL}/{body['id']}")).json()
@@ -275,8 +275,23 @@ async def test_create_422_cases(
         client, payload(dataset_id, prompt_template="no placeholder")
     ) == ["body", "prompt_template"]
     assert await _loc(
-        client, payload(dataset_id, evaluator_config={"k": "x" * 20_000})
-    ) == ["body", "evaluator_config"]
+        client,
+        payload(
+            dataset_id,
+            evaluator_config={
+                "evaluators": [
+                    {"id": "a", "type": "length_between", "min_length": -1}
+                ]
+            },
+        ),
+    ) == [
+        "body",
+        "evaluator_config",
+        "evaluators",
+        0,
+        "length_between",
+        "min_length",
+    ]
     assert await _loc(client, payload(dataset_id, name="  ")) == [
         "body",
         "name",
@@ -322,3 +337,50 @@ async def test_invalid_status_filter_and_id_422(
     assert response.status_code == 422
     assert response.json()["detail"][0]["loc"] == ["query", "status"]
     assert (await client.get(f"{URL}/not-a-uuid")).status_code == 422
+
+
+async def test_valid_evaluator_config_is_stored_and_returned(
+    client: AsyncClient, session_factory: Factory
+) -> None:
+    dataset_id = await make_dataset(session_factory, 1)
+    config = {
+        "evaluators": [
+            {"id": "em", "type": "exact_match"},
+            {"id": "js", "type": "json_valid"},
+        ]
+    }
+    response = await client.post(
+        URL, json=payload(dataset_id, evaluator_config=config)
+    )
+    assert response.status_code == 201
+    stored = response.json()["evaluator_config"]["evaluators"]
+    assert [(e["id"], e["type"]) for e in stored] == [
+        ("em", "exact_match"),
+        ("js", "json_valid"),
+    ]
+    got = (await client.get(f"{URL}/{response.json()['id']}")).json()
+    assert got["evaluator_config"] == response.json()["evaluator_config"]
+
+
+@pytest.mark.parametrize(
+    "evaluator_config",
+    [
+        {"evaluators": [{"id": "a", "type": "no_such_type"}]},
+        {
+            "evaluators": [
+                {"id": "a", "type": "exact_match"},
+                {"id": "a", "type": "json_valid"},
+            ]
+        },
+        ["not", "an", "object"],
+    ],
+)
+async def test_invalid_evaluator_config_is_422(
+    client: AsyncClient, session_factory: Factory, evaluator_config: Any
+) -> None:
+    dataset_id = await make_dataset(session_factory, 1)
+    loc = await _loc(
+        client, payload(dataset_id, evaluator_config=evaluator_config)
+    )
+    assert loc[:2] == ["body", "evaluator_config"]
+    assert (await client.get(URL)).json()["total"] == 0
