@@ -47,3 +47,35 @@ def test_validation_error_does_not_leak_secrets(
         SettingsSchema(_env_file=None)
 
     assert "s3cret" not in str(exc.value)
+
+
+def test_provider_keys_optional_and_masked(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", DB_URL)
+    monkeypatch.setenv("RABBITMQ_URL", MQ_URL)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    unset = SettingsSchema(_env_file=None)
+    assert unset.openai_api_key is None
+    assert unset.anthropic_api_key is None
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-openai-secret")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-anthropic-secret")
+    settings = SettingsSchema(_env_file=None)
+
+    rendered = repr(settings) + str(settings) + settings.model_dump_json()
+    assert "sk-test" not in rendered
+    assert settings.openai_api_key is not None
+    assert settings.openai_api_key.get_secret_value() == "sk-test-openai-secret"
+
+
+def test_llm_max_concurrency_default_and_minimum(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DB_URL)
+    monkeypatch.setenv("RABBITMQ_URL", MQ_URL)
+    monkeypatch.delenv("LLM_MAX_CONCURRENCY", raising=False)
+    assert SettingsSchema(_env_file=None).llm_max_concurrency == 4
+    monkeypatch.setenv("LLM_MAX_CONCURRENCY", "0")
+    with pytest.raises(ValidationError):
+        SettingsSchema(_env_file=None)

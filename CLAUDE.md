@@ -186,10 +186,10 @@ Follow the repository's OpenSpec workflow for meaningful behavioral changes.
 6. Implement the approved scope and add regression tests.
 7. Run relevant tests, linting, formatting, and type checks.
 8. Request independent code review and address valid findings.
-9. Push the branch and open a pull request.
+9. When the flow is finished, commit the changes on the feature branch following the `git-conventional-commits` skill. Do not push; pushing the branch and opening a pull request happen only when the user explicitly asks.
 10. Report the implementation, checks, limitations, and unresolved issues.
 
-Do not merge pull requests or bypass required checks without explicit authorization.
+Do not push, merge pull requests or bypass required checks without explicit authorization.
 
 Use a proportionate workflow for documentation-only changes and refactoring that does not change behavior.
 
@@ -247,7 +247,7 @@ Use `scripts/kan.py` (reads `KAN_API_KEY` from the git-ignored `.env.kan`) inste
 Board workflow:
 
 - When work on a task starts, move its card to `In-progress`.
-- When the reviewer agent has reviewed the task, move its card to `Review` (`scripts/kan.py move CARD_ID Review`) and comment with the review outcome.
+- When the reviewer agent has reviewed the task, move its card to `Review` (`scripts/kan.py move CARD_ID Review`) and comment with the review outcome, following the `kan-review` skill.
 - Move the card to `Done` only after the pull request is merged by the user.
 
 Never print or commit the API key.

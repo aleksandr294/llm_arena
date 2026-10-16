@@ -16,6 +16,8 @@ alembic = "*"
 taskiq = "*"
 taskiq-aio-pika = "*"
 uvicorn = "*"
+openai = "^3.32.0"
+anthropic = "^1.15.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
@@ -52,4 +54,7 @@ explicit_package_bases = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-markers = ["integration: needs running PostgreSQL/RabbitMQ"]
+markers = [
+    "integration: needs running PostgreSQL/RabbitMQ",
+    "real_provider: calls real LLM provider APIs (opt-in, costs money)",
+]
