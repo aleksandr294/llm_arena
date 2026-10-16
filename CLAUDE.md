@@ -182,7 +182,7 @@ Follow the repository's OpenSpec workflow for meaningful behavioral changes.
 2. Inspect the affected implementation and tests.
 3. Create an OpenSpec change with a proposal, design, tasks, and relevant specification deltas.
 4. Break work into small, verifiable tasks.
-5. Use a dedicated branch for each task or logically cohesive implementation block.
+5. Start every new feature on a new branch created from an up-to-date `main` (for example `feat/<change-name>`), before writing any code or OpenSpec artifacts. Never work on a feature directly on `main` or reuse a previous feature's branch. Use a dedicated branch for each task or logically cohesive implementation block.
 6. Implement the approved scope and add regression tests.
 7. Run relevant tests, linting, formatting, and type checks.
 8. Request independent code review and address valid findings.
