@@ -10,6 +10,8 @@ own ``tasks.py``; no change here is needed. Enqueuing a task only means it
 was submitted: completion must be observed through persisted state.
 """
 
+import asyncio
+
 from taskiq import AsyncBroker
 from taskiq_aio_pika import AioPikaBroker
 
@@ -23,3 +25,18 @@ def build_broker(url: str) -> AsyncBroker:
 
 
 broker = build_broker(get_settings().rabbitmq_url.get_secret_value())
+
+
+_broker_lock = asyncio.Lock()
+_broker_started = False
+
+
+async def ensure_broker_started() -> None:
+    """Start the broker once for processes that are not workers (the API).
+    Lazy so a RabbitMQ outage does not stop the API from booting; a failed
+    startup is retried on the next call."""
+    global _broker_started
+    async with _broker_lock:
+        if not _broker_started:
+            await broker.startup()
+            _broker_started = True

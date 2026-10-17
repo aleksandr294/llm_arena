@@ -1,4 +1,3 @@
-import json
 import uuid
 from datetime import datetime
 from typing import Annotated, Any
@@ -16,8 +15,8 @@ from components.datasets.schemas import (
     TEXT_MAX,
     NameStr,
     _reject_nul,
-    _reject_nul_deep,
 )
+from components.evaluation.schemas import EvaluatorConfigSchema
 from components.experiments.logic import INPUT_TOKEN
 from components.third_party.llm.schemas import ModelTargetSchema
 
@@ -26,21 +25,11 @@ MAX_ATTEMPTS = 5
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_TIMEOUT_SECONDS = 60.0
 MAX_TIMEOUT_SECONDS = 120.0
-EVALUATOR_CONFIG_MAX_BYTES = 10 * 1024
 
 
 def _require_input_token(value: str) -> str:
     if INPUT_TOKEN not in value:
         raise ValueError(f"must contain the {INPUT_TOKEN} placeholder")
-    return value
-
-
-def _limit_evaluator_size(value: dict[str, Any]) -> dict[str, Any]:
-    size = len(json.dumps(value, ensure_ascii=False).encode())
-    if size > EVALUATOR_CONFIG_MAX_BYTES:
-        raise ValueError(
-            f"must be at most {EVALUATOR_CONFIG_MAX_BYTES} bytes serialized"
-        )
     return value
 
 
@@ -54,11 +43,6 @@ SystemPromptStr = Annotated[
     str,
     StringConstraints(min_length=1, max_length=TEXT_MAX),
     AfterValidator(_reject_nul),
-]
-EvaluatorConfigDict = Annotated[
-    dict[str, Any],
-    AfterValidator(_reject_nul_deep),
-    AfterValidator(_limit_evaluator_size),
 ]
 
 
@@ -91,7 +75,10 @@ class ExperimentCreateSchema(BaseModel):
     dataset_id: uuid.UUID
     prompt_template: PromptTemplateStr
     config: ExperimentConfigSchema
-    evaluator_config: EvaluatorConfigDict = Field(default_factory=dict)
+    # Nested validation gives 422 errors with the path under evaluator_config.
+    evaluator_config: EvaluatorConfigSchema = Field(
+        default_factory=EvaluatorConfigSchema
+    )
 
 
 class ExperimentSchema(BaseModel):

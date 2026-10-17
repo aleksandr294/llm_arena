@@ -5,7 +5,6 @@ database, so a redelivered or stale message cannot change what is executed.
 Enqueueing only means the message was submitted, never that the result ran.
 """
 
-import asyncio
 import uuid
 from collections.abc import Sequence
 from functools import lru_cache
@@ -13,11 +12,16 @@ from typing import Any
 
 from components.core.config import get_settings
 from components.core.database import get_session_factory
+from components.evaluation import tasks as evaluation_tasks
 from components.experiments.runner import ExperimentRunner
 from components.third_party.llm.service import LLMService
-from taskiq_app import broker
+from taskiq_app import broker, ensure_broker_started
 
 EXECUTE_RESULT_TASK = "experiments.execute_result"
+
+
+async def _enqueue_evaluation(result_id: uuid.UUID) -> None:
+    await evaluation_tasks.enqueue_results([result_id])
 
 
 @lru_cache
@@ -29,6 +33,7 @@ def get_runner() -> ExperimentRunner:
         get_session_factory(),
         LLMService(settings),
         settings.llm_max_concurrency,
+        on_succeeded=_enqueue_evaluation,
     )
 
 
@@ -45,18 +50,8 @@ async def enqueue_results(
         await task.kiq(str(result_id))
 
 
-_broker_lock = asyncio.Lock()
-_broker_started = False
-
-
 async def submit_results(result_ids: Sequence[uuid.UUID]) -> None:
     """``enqueue_results`` for the API process, which (unlike a worker)
-    does not start the broker itself. Started lazily on first use so a
-    RabbitMQ outage does not stop the API from booting; a failed startup
-    is retried on the next call."""
-    global _broker_started
-    async with _broker_lock:
-        if not _broker_started:
-            await broker.startup()
-            _broker_started = True
+    does not start the broker itself."""
+    await ensure_broker_started()
     await enqueue_results(result_ids)

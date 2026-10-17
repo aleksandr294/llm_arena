@@ -2,10 +2,12 @@
 
 import asyncio
 import uuid
+from typing import Any
 
 import pytest
 from sqlalchemy import text
 
+from components.experiments import runner as runner_module
 from components.experiments.models import (
     Experiment,
     ExperimentResult,
@@ -457,3 +459,126 @@ async def test_reclaimed_result_keeps_full_retry_budget(
     assert row.status == ResultStatus.SUCCEEDED
     # Cumulative: 3 earlier requests + 3 in this run.
     assert row.attempts == 6 and len(llm.calls) == 3
+
+
+class Hook:
+    def __init__(self, fail: bool = False) -> None:
+        self.ids: list[uuid.UUID] = []
+        self.fail = fail
+
+    async def __call__(self, result_id: uuid.UUID) -> None:
+        self.ids.append(result_id)
+        if self.fail:
+            raise RuntimeError("broker down: secret")
+
+
+async def test_hook_called_once_after_succeeded_outcome(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=2, start=True)
+    ids = await _ids(session_factory, experiment_id, ResultStatus.PENDING)
+    hook = Hook()
+    runner = ExperimentRunner(
+        session_factory,
+        FakeLLM().as_service(),
+        on_succeeded=hook,
+        jitter=lambda: 0.0,
+    )
+    await runner.run(ids[0])
+    await runner.run(ids[0])  # duplicate delivery: not claimable, no hook
+    assert hook.ids == [ids[0]]
+    # The hook sees a committed, succeeded row.
+    assert (await _row(session_factory, ids[0])).status == "succeeded"
+
+
+async def test_hook_not_called_for_failure(session_factory: Factory) -> None:
+    experiment_id = await make_experiment(
+        session_factory, cases=1, max_attempts=1, start=True
+    )
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    hook = Hook()
+    llm = FakeLLM([provider_error(LLMErrorKind.AUTHENTICATION)])
+    runner = ExperimentRunner(
+        session_factory, llm.as_service(), on_succeeded=hook
+    )
+    await runner.run(result_id)
+    assert hook.ids == []
+    assert (await _row(session_factory, result_id)).status == "failed"
+
+
+async def test_hook_not_called_for_stale_write(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    hook = Hook()
+    llm = FakeLLM()
+
+    async def steal(prompt: str) -> Any:
+        # Another worker re-claimed the result while this call was running.
+        async with session_factory() as s:
+            await s.execute(
+                text(
+                    "update experiment_results set started_at = now() "
+                    "+ interval '1 minute'"
+                )
+            )
+            await s.commit()
+        return response()
+
+    llm.handler = steal
+    runner = ExperimentRunner(
+        session_factory, llm.as_service(), on_succeeded=hook
+    )
+    await runner.run(result_id)
+    assert hook.ids == []
+
+
+async def test_failing_hook_does_not_change_the_result(
+    session_factory: Factory, caplog: pytest.LogCaptureFixture
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    hook = Hook(fail=True)
+    runner = ExperimentRunner(
+        session_factory, FakeLLM().as_service(), on_succeeded=hook
+    )
+    with caplog.at_level("WARNING"):
+        await runner.run(result_id)
+    row = await _row(session_factory, result_id)
+    assert (row.status, row.response_text) == ("succeeded", "ok")
+    assert (await _experiment(session_factory, experiment_id)).status == (
+        ExperimentStatus.COMPLETED
+    )
+    assert "RuntimeError" in caplog.text
+    assert "secret" not in caplog.text
+
+
+async def test_hanging_hook_is_bounded(
+    session_factory: Factory,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner_module, "HOOK_TIMEOUT_SECONDS", 0.05)
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+
+    async def hang(result_id: uuid.UUID) -> None:
+        await asyncio.Event().wait()
+
+    runner = ExperimentRunner(
+        session_factory, FakeLLM().as_service(), on_succeeded=hang
+    )
+    with caplog.at_level("WARNING"):
+        await asyncio.wait_for(runner.run(result_id), 5)
+    row = await _row(session_factory, result_id)
+    assert row.status == "succeeded"
+    assert "TimeoutError" in caplog.text

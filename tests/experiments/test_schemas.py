@@ -38,7 +38,7 @@ def test_valid_minimal_payload_gets_defaults() -> None:
     assert parsed.config.max_attempts == 3
     assert parsed.config.timeout_seconds == 60.0
     assert parsed.config.temperature is None
-    assert parsed.evaluator_config == {}
+    assert parsed.evaluator_config.model_dump() == {"evaluators": []}
 
 
 def test_valid_full_payload() -> None:
@@ -52,7 +52,9 @@ def test_valid_full_payload() -> None:
                 timeout_seconds=5,
                 max_attempts=5,
             ),
-            evaluator_config={"checks": [{"type": "exact"}]},
+            evaluator_config={
+                "evaluators": [{"id": "a", "type": "json_valid"}]
+            },
         )
     )
     assert len(parsed.config.targets) == 10
@@ -168,23 +170,19 @@ def test_evaluator_config_must_be_object(value: Any) -> None:
     assert _loc(exc) == ("evaluator_config",)
 
 
-def test_evaluator_config_size_limit() -> None:
-    ok = {"k": "a" * (10 * 1024 - 20)}
-    ExperimentCreateSchema.model_validate(_payload(evaluator_config=ok))
+def test_evaluator_config_error_has_field_path() -> None:
+    bad = {"evaluators": [{"id": "a", "type": "contains", "values": []}]}
+    with pytest.raises(ValidationError) as exc:
+        ExperimentCreateSchema.model_validate(_payload(evaluator_config=bad))
+    assert _loc(exc)[:3] == ("evaluator_config", "evaluators", 0)
+
+
+def test_evaluator_config_rejects_unknown_keys() -> None:
     with pytest.raises(ValidationError) as exc:
         ExperimentCreateSchema.model_validate(
-            _payload(evaluator_config={"k": "a" * (10 * 1024)})
+            _payload(evaluator_config={"checks": []})
         )
-    assert _loc(exc) == ("evaluator_config",)
-
-
-def test_evaluator_config_rejects_nul_deeply() -> None:
-    for config in ({"a\x00": 1}, {"a": ["x\x00"]}, {"a": {"b": "\x00"}}):
-        with pytest.raises(ValidationError) as exc:
-            ExperimentCreateSchema.model_validate(
-                _payload(evaluator_config=config)
-            )
-        assert _loc(exc) == ("evaluator_config",)
+    assert _loc(exc) == ("evaluator_config", "checks")
 
 
 def test_read_schema_parses_stored_config() -> None:
