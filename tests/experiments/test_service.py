@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from components.core.access import OrganizationRequiredError, Role
 from components.datasets.models import TestCase
 from components.datasets.service import DatasetNotFoundError
 from components.experiments.models import (
@@ -22,6 +23,7 @@ from components.experiments.service import (
     InvalidTransitionError,
 )
 from components.third_party.llm.schemas import ProviderName
+from tests.access import ROOT, seed_principal
 from tests.experiments.helpers import (
     Enqueued,
     Factory,
@@ -65,13 +67,16 @@ async def _result_ids(factory: Factory, experiment_id: uuid.UUID):  # type: igno
 async def test_create_makes_pending_results_with_rendered_prompts(
     session_factory: Factory,
 ) -> None:
-    dataset_id = await make_dataset(session_factory, cases=3)
+    owner = await seed_principal(session_factory)
+    dataset_id = await make_dataset(session_factory, cases=3, owner=owner)
     enqueued = Enqueued()
     async with session_factory() as s:
         experiment = await _service(s, enqueued).create(
-            create_data(dataset_id, ("m1", "m2"))
+            owner, create_data(dataset_id, ("m1", "m2"))
         )
         await s.commit()
+        assert experiment.owner_id == owner.user_id
+        assert experiment.organization_id == owner.organization_id
         assert experiment.status == ExperimentStatus.PENDING
         assert experiment.config["targets"][0]["provider"] == "openai"
         rows = (
@@ -96,32 +101,35 @@ async def test_case_set_frozen_after_dataset_grows(
         s.add(TestCase(dataset_id=dataset_id, position=3, input="new"))
         await s.commit()
     async with session_factory() as s:
-        _, counts = await _service(s).get(experiment_id)
+        _, counts = await _service(s).get(ROOT, experiment_id)
     assert counts == {"pending": 2}
 
 
 async def test_unknown_dataset(session_factory: Factory) -> None:
+    owner = await seed_principal(session_factory)
     async with session_factory() as s:
         with pytest.raises(DatasetNotFoundError):
-            await _service(s).create(create_data(uuid.uuid4()))
+            await _service(s).create(owner, create_data(uuid.uuid4()))
 
 
 async def test_empty_dataset_is_rejected(session_factory: Factory) -> None:
-    dataset_id = await make_dataset(session_factory, cases=0)
+    owner = await seed_principal(session_factory)
+    dataset_id = await make_dataset(session_factory, cases=0, owner=owner)
     async with session_factory() as s:
         with pytest.raises(ExperimentValidationError) as exc:
-            await _service(s).create(create_data(dataset_id))
+            await _service(s).create(owner, create_data(dataset_id))
     assert exc.value.field == "dataset_id"
 
 
 async def test_unconfigured_provider_is_rejected(
     session_factory: Factory,
 ) -> None:
-    dataset_id = await make_dataset(session_factory)
+    owner = await seed_principal(session_factory)
+    dataset_id = await make_dataset(session_factory, owner=owner)
     llm = FakeLLM(unconfigured={ProviderName.OPENAI})
     async with session_factory() as s:
         with pytest.raises(ExperimentValidationError) as exc:
-            await _service(s, llm=llm).create(create_data(dataset_id))
+            await _service(s, llm=llm).create(owner, create_data(dataset_id))
         assert exc.value.field == "config.targets"
         assert "OPENAI_API_KEY" in str(exc.value)
         await s.rollback()
@@ -133,10 +141,11 @@ async def test_result_cap(
     session_factory: Factory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("components.experiments.service.MAX_RESULTS", 5)
-    dataset_id = await make_dataset(session_factory, cases=3)
+    owner = await seed_principal(session_factory)
+    dataset_id = await make_dataset(session_factory, cases=3, owner=owner)
     async with session_factory() as s:
         with pytest.raises(ExperimentValidationError):
-            await _service(s).create(create_data(dataset_id, ("a", "b")))
+            await _service(s).create(owner, create_data(dataset_id, ("a", "b")))
 
 
 async def test_start_enqueues_pending_and_sets_running(
@@ -145,11 +154,11 @@ async def test_start_enqueues_pending_and_sets_running(
     experiment_id = await make_experiment(session_factory, cases=3)
     enqueued = Enqueued()
     async with session_factory() as s:
-        count = await _service(s, enqueued).start(experiment_id)
+        count = await _service(s, enqueued).start(ROOT, experiment_id)
     assert count == 3
     assert len(enqueued.flat) == 3
     async with session_factory() as s:
-        experiment, counts = await _service(s).get(experiment_id)
+        experiment, counts = await _service(s).get(ROOT, experiment_id)
     assert experiment.status == ExperimentStatus.RUNNING
     assert experiment.started_at is not None
     assert counts == {"pending": 3}
@@ -164,7 +173,7 @@ async def test_start_again_enqueues_only_pending(
     await _set_status(session_factory, pending[1], ResultStatus.RUNNING)
     enqueued = Enqueued()
     async with session_factory() as s:
-        count = await _service(s, enqueued).start(experiment_id)
+        count = await _service(s, enqueued).start(ROOT, experiment_id)
     assert count == 1
     assert enqueued.flat == [pending[2]]
 
@@ -184,7 +193,7 @@ async def test_start_final_experiment_conflicts(
         await s.commit()
     async with session_factory() as s:
         with pytest.raises(InvalidTransitionError):
-            await _service(s).start(experiment_id)
+            await _service(s).start(ROOT, experiment_id)
 
 
 async def test_start_enqueue_failure_keeps_results_pending(
@@ -198,14 +207,14 @@ async def test_start_enqueue_failure_keeps_results_pending(
     async with session_factory() as s:
         service = ExperimentService(s, FakeLLM().as_service(), boom)
         with pytest.raises(ConnectionError):
-            await service.start(experiment_id)
+            await service.start(ROOT, experiment_id)
     async with session_factory() as s:
-        experiment, counts = await _service(s).get(experiment_id)
+        experiment, counts = await _service(s).get(ROOT, experiment_id)
         assert experiment.status == ExperimentStatus.RUNNING
         assert counts == {"pending": 3}
     enqueued = Enqueued()
     async with session_factory() as s:
-        assert await _service(s, enqueued).start(experiment_id) == 3
+        assert await _service(s, enqueued).start(ROOT, experiment_id) == 3
 
 
 async def test_unknown_experiment(session_factory: Factory) -> None:
@@ -213,11 +222,11 @@ async def test_unknown_experiment(session_factory: Factory) -> None:
     async with session_factory() as s:
         service = _service(s)
         for call in (
-            service.get(missing),
-            service.start(missing),
-            service.cancel(missing),
-            service.retry_failed(missing),
-            service.list_results(missing, 10, 0),
+            service.get(ROOT, missing),
+            service.start(ROOT, missing),
+            service.cancel(ROOT, missing),
+            service.retry_failed(ROOT, missing),
+            service.list_results(ROOT, missing, 10, 0),
         ):
             with pytest.raises(ExperimentNotFoundError):
                 await call
@@ -226,12 +235,12 @@ async def test_unknown_experiment(session_factory: Factory) -> None:
 async def test_cancel_pending_experiment(session_factory: Factory) -> None:
     experiment_id = await make_experiment(session_factory)
     async with session_factory() as s:
-        experiment = await _service(s).cancel(experiment_id)
+        experiment = await _service(s).cancel(ROOT, experiment_id)
         await s.commit()
         assert experiment.status == ExperimentStatus.CANCELLED
         assert experiment.finished_at is not None
     async with session_factory() as s:
-        _, counts = await _service(s).get(experiment_id)
+        _, counts = await _service(s).get(ROOT, experiment_id)
     assert counts == {"cancelled": 3}
 
 
@@ -242,15 +251,15 @@ async def test_cancel_running_leaves_running_result(
     pending = await _result_ids(session_factory, experiment_id)
     await _set_status(session_factory, pending[0], ResultStatus.RUNNING)
     async with session_factory() as s:
-        experiment = await _service(s).cancel(experiment_id)
+        experiment = await _service(s).cancel(ROOT, experiment_id)
         await s.commit()
         assert experiment.status == ExperimentStatus.RUNNING
         assert experiment.cancel_requested is True
-        _, counts = await _service(s).get(experiment_id)
+        _, counts = await _service(s).get(ROOT, experiment_id)
     assert counts == {"running": 1, "cancelled": 2}
     # Repeating while a result is still running is harmless.
     async with session_factory() as s:
-        await _service(s).cancel(experiment_id)
+        await _service(s).cancel(ROOT, experiment_id)
 
 
 async def test_cancel_finished_conflicts(session_factory: Factory) -> None:
@@ -262,7 +271,7 @@ async def test_cancel_finished_conflicts(session_factory: Factory) -> None:
         await s.commit()
     async with session_factory() as s:
         with pytest.raises(InvalidTransitionError):
-            await _service(s).cancel(experiment_id)
+            await _service(s).cancel(ROOT, experiment_id)
 
 
 async def test_retry_failed_resets_only_failed(
@@ -286,10 +295,12 @@ async def test_retry_failed_resets_only_failed(
         await s.commit()
     enqueued = Enqueued()
     async with session_factory() as s:
-        assert await _service(s, enqueued).retry_failed(experiment_id) == 1
+        assert (
+            await _service(s, enqueued).retry_failed(ROOT, experiment_id) == 1
+        )
     assert enqueued.flat == [ids[1]]
     async with session_factory() as s:
-        experiment, counts = await _service(s).get(experiment_id)
+        experiment, counts = await _service(s).get(ROOT, experiment_id)
         assert experiment.status == ExperimentStatus.RUNNING
         assert experiment.finished_at is None
         assert counts == {"succeeded": 2, "pending": 1}
@@ -309,7 +320,7 @@ async def test_retry_completed_conflicts(session_factory: Factory) -> None:
         await s.commit()
     async with session_factory() as s:
         with pytest.raises(InvalidTransitionError):
-            await _service(s).retry_failed(experiment_id)
+            await _service(s).retry_failed(ROOT, experiment_id)
 
 
 async def test_list_results_filter_and_list_experiments(
@@ -321,10 +332,10 @@ async def test_list_results_filter_and_list_experiments(
     async with session_factory() as s:
         service = _service(s)
         items, total = await service.list_results(
-            experiment_id, 10, 0, "failed"
+            ROOT, experiment_id, 10, 0, "failed"
         )
         assert (total, [i.id for i in items]) == (1, [ids[0]])
-        experiments, total = await service.list_experiments(10, 0)
+        experiments, total = await service.list_experiments(ROOT, 10, 0)
         assert total == 1 and experiments[0].id == experiment_id
 
 
@@ -353,7 +364,7 @@ async def test_start_again_enqueues_stale_running_results(
         await s.commit()
     enqueued = Enqueued()
     async with session_factory() as s:
-        count = await _service(s, enqueued).start(experiment_id)
+        count = await _service(s, enqueued).start(ROOT, experiment_id)
     # The stale running result and the pending one; not the fresh running.
     assert count == 2
     assert sorted(enqueued.flat) == sorted([ids[0], ids[2]])
@@ -372,9 +383,98 @@ async def test_retry_failed_without_failed_results_finalizes(
         await s.commit()
     enqueued = Enqueued()
     async with session_factory() as s:
-        assert await _service(s, enqueued).retry_failed(experiment_id) == 0
+        assert (
+            await _service(s, enqueued).retry_failed(ROOT, experiment_id) == 0
+        )
     assert enqueued.flat == []
     async with session_factory() as s:
-        experiment, _ = await _service(s).get(experiment_id)
+        experiment, _ = await _service(s).get(ROOT, experiment_id)
         assert experiment.status == ExperimentStatus.COMPLETED
         assert experiment.finished_at is not None
+
+
+async def test_superadmin_cannot_create(session_factory: Factory) -> None:
+    dataset_id = await make_dataset(session_factory)
+    async with session_factory() as s:
+        with pytest.raises(OrganizationRequiredError):
+            await _service(s).create(ROOT, create_data(dataset_id))
+    async with session_factory() as s:
+        assert (await s.scalars(select(Experiment))).all() == []
+
+
+async def test_dataset_outside_scope_is_not_found(
+    session_factory: Factory,
+) -> None:
+    owner = await seed_principal(session_factory)
+    dataset_id = await make_dataset(session_factory, owner=owner)
+    colleague = await seed_principal(
+        session_factory, Role.STAFF, owner.organization_id
+    )
+    stranger = await seed_principal(session_factory, Role.ADMIN)
+    for principal in (colleague, stranger):
+        async with session_factory() as s:
+            with pytest.raises(DatasetNotFoundError):
+                await _service(s).create(principal, create_data(dataset_id))
+    async with session_factory() as s:
+        assert (await s.scalars(select(Experiment))).all() == []
+        assert (await s.scalars(select(ExperimentResult))).all() == []
+
+
+async def test_experiment_actions_use_the_scope(
+    session_factory: Factory,
+) -> None:
+    owner = await seed_principal(session_factory)
+    experiment_id = await make_experiment(session_factory, owner=owner)
+    colleague = await seed_principal(
+        session_factory, Role.STAFF, owner.organization_id
+    )
+    admin = await seed_principal(
+        session_factory, Role.ADMIN, owner.organization_id
+    )
+    stranger = await seed_principal(session_factory, Role.ADMIN)
+    enqueued = Enqueued()
+    async with session_factory() as s:
+        service = _service(s, enqueued)
+        for denied in (colleague, stranger):
+            for call in (
+                service.get(denied, experiment_id),
+                service.list_results(denied, experiment_id, 10, 0),
+                service.start(denied, experiment_id),
+                service.cancel(denied, experiment_id),
+                service.retry_failed(denied, experiment_id),
+            ):
+                with pytest.raises(ExperimentNotFoundError):
+                    await call
+        assert enqueued.flat == []
+        for allowed in (owner, admin, ROOT):
+            experiment, _ = await service.get(allowed, experiment_id)
+            assert experiment.id == experiment_id
+        assert await service.start(admin, experiment_id) == 3
+    assert len(enqueued.flat) == 3
+
+
+async def test_list_filters_and_totals(session_factory: Factory) -> None:
+    owner = await seed_principal(session_factory)
+    other = await seed_principal(
+        session_factory, Role.STAFF, owner.organization_id
+    )
+    mine = await make_experiment(session_factory, owner=owner)
+    theirs = await make_experiment(session_factory, owner=other)
+    async with session_factory() as s:
+        service = _service(s)
+        items, total = await service.list_experiments(owner, 10, 0)
+        assert ([i.id for i in items], total) == ([mine], 1)
+        items, total = await service.list_experiments(
+            owner, 10, 0, owner_id=other.user_id
+        )
+        assert ([i.id for i in items], total) == ([], 0)
+        items, total = await service.list_experiments(ROOT, 10, 0)
+        assert {i.id for i in items} == {mine, theirs} and total == 2
+        items, total = await service.list_experiments(
+            ROOT, 10, 0, status="running"
+        )
+        assert total == 0
+        items, total = await service.list_experiments(
+            ROOT, 10, 0, status="pending", owner_id=other.user_id
+        )
+        assert ([i.id for i in items], total) == ([theirs], 1)

@@ -10,6 +10,7 @@ from collections import defaultdict
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from components.core.access import Principal
 from components.evaluation.schemas import (
     EvaluatorConfigSchema,
     parse_evaluator_config,
@@ -80,16 +81,22 @@ class MetricsService:
         self._pricing_file = pricing_file
         self._metrics = MetricsRepository(session)
 
-    async def _experiment(self, experiment_id: uuid.UUID) -> Experiment:
-        experiment = await ExperimentRepository(self._session).get(
-            experiment_id
+    async def _experiment(
+        self, principal: Principal, experiment_id: uuid.UUID
+    ) -> Experiment:
+        # Metrics inherit the access of their experiment; anything outside
+        # the caller's scope is reported as not found.
+        experiment = await ExperimentRepository(self._session).get_scoped(
+            experiment_id, principal
         )
         if experiment is None:
             raise ExperimentNotFoundError(experiment_id)
         return experiment
 
-    async def summary(self, experiment_id: uuid.UUID) -> SummarySchema:
-        experiment = await self._experiment(experiment_id)
+    async def summary(
+        self, principal: Principal, experiment_id: uuid.UUID
+    ) -> SummarySchema:
+        experiment = await self._experiment(principal, experiment_id)
         statuses = await ExperimentResultRepository(
             self._session
         ).status_counts(experiment_id)
@@ -101,8 +108,10 @@ class MetricsService:
             counts=counts,
         )
 
-    async def comparison(self, experiment_id: uuid.UUID) -> ComparisonSchema:
-        experiment = await self._experiment(experiment_id)
+    async def comparison(
+        self, principal: Principal, experiment_id: uuid.UUID
+    ) -> ComparisonSchema:
+        experiment = await self._experiment(principal, experiment_id)
         pricing, pricing_error = self._load_pricing()
         aggregates = await self._metrics.target_aggregates(experiment_id)
         kinds = await self._metrics.error_kinds(experiment_id)
@@ -166,12 +175,13 @@ class MetricsService:
 
     async def cases(
         self,
+        principal: Principal,
         experiment_id: uuid.UUID,
         limit: int,
         offset: int,
         include_responses: bool = False,
     ) -> CasePageSchema:
-        await self._experiment(experiment_id)
+        await self._experiment(principal, experiment_id)
         refs, total = await self._metrics.case_page(
             experiment_id, limit, offset
         )

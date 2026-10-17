@@ -8,13 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from components.core.database import Base, create_engine
 from components.datasets.models import Dataset, TestCase
+from tests.access import ACCESS_MODELS
 
 
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     """Engine on ``DATABASE_URL`` with fresh dataset tables per test."""
     engine = create_engine(os.environ["DATABASE_URL"])
-    tables = [cast(Table, m.__table__) for m in (Dataset, TestCase)]
+    tables = [
+        cast(Table, m.__table__) for m in (*ACCESS_MODELS, Dataset, TestCase)
+    ]
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all, tables=tables)
         await conn.run_sync(Base.metadata.create_all, tables=tables)

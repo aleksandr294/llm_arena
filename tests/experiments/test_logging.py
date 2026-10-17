@@ -12,10 +12,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.experiments import get_enqueue, get_llm_service
+from components.core.access import Principal
 from components.core.database import get_session
 from components.experiments.runner import ExperimentRunner
 from components.third_party.llm.providers.base import LLMProviderError
 from components.third_party.llm.schemas import LLMErrorKind, ProviderName
+from tests.access import Actors
 from tests.experiments.helpers import (
     Enqueued,
     Factory,
@@ -52,11 +54,23 @@ def _overrides(
     app.dependency_overrides[get_session] = session_override
 
 
+@pytest.fixture
+async def client(actors: Actors) -> AsyncClient:
+    """Authenticated as staff user A; shadows the anonymous root client."""
+    return await actors.client("staff_a")
+
+
+@pytest.fixture
+def owner(actors: Actors) -> Principal:
+    return actors.principal("staff_a")
+
+
 async def test_no_sentinel_in_logs_or_stored_errors(
     app: FastAPI,
     client: AsyncClient,
     session_factory: Factory,
     caplog: pytest.LogCaptureFixture,
+    owner: Principal,
 ) -> None:
     caplog.set_level(logging.DEBUG)
     enqueued = Enqueued()
@@ -81,7 +95,7 @@ async def test_no_sentinel_in_logs_or_stored_errors(
     app.dependency_overrides[get_llm_service] = llm.as_service
     app.dependency_overrides[get_enqueue] = lambda: enqueued
 
-    dataset_id = await make_dataset(session_factory, 3)
+    dataset_id = await make_dataset(session_factory, 3, owner)
     # Put the prompt sentinel into the case content.
     async with session_factory() as session:
         await session.execute(

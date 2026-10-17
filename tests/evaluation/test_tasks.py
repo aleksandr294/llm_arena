@@ -17,6 +17,7 @@ from components.evaluation.service import EvaluationService
 from components.experiments.models import Experiment, ExperimentStatus
 from components.experiments.runner import ExperimentRunner
 from components.experiments.service import ExperimentService
+from tests.access import ROOT, seed_principal
 from tests.evaluation.test_repository import Factory
 from tests.experiments.helpers import (
     FakeLLM,
@@ -88,7 +89,8 @@ async def test_started_experiment_ends_with_stored_evaluations(
     async def enqueue(ids: Any) -> None:
         await experiments.enqueue_results(ids, task=execute)
 
-    dataset_id = await make_dataset(session_factory, 3)
+    owner = await seed_principal(session_factory)
+    dataset_id = await make_dataset(session_factory, 3, owner)
     data = create_data(dataset_id)
     data.evaluator_config = data.evaluator_config.model_validate(
         {
@@ -100,13 +102,13 @@ async def test_started_experiment_ends_with_stored_evaluations(
     )
     async with session_factory() as s:
         service = ExperimentService(s, llm.as_service(), enqueue)
-        experiment = await service.create(data)
+        experiment = await service.create(owner, data)
         await s.commit()
         experiment_id = experiment.id
     async with session_factory() as s:
         assert (
             await ExperimentService(s, llm.as_service(), enqueue).start(
-                experiment_id
+                ROOT, experiment_id
             )
             == 3
         )
@@ -125,7 +127,9 @@ async def test_started_experiment_ends_with_stored_evaluations(
     for row in rows:
         by_id.setdefault(row.evaluator_id, set()).add(row.status)
     assert by_id == {"exact": {"passed"}, "len": {"passed"}}
-    summary = await EvaluationService(session_factory).summary(experiment_id)
+    summary = await EvaluationService(session_factory).summary(
+        ROOT, experiment_id
+    )
     assert summary.unevaluated_results == 0
 
 

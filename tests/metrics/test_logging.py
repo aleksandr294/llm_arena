@@ -11,9 +11,11 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.metrics import get_factory, get_pricing_file
+from components.core.access import Principal
 from components.core.database import get_session
 from components.datasets.models import TestCase
 from components.experiments.models import ExperimentResult
+from tests.access import Actors
 from tests.metrics.helpers import Row, seed
 
 pytestmark = pytest.mark.integration
@@ -36,7 +38,18 @@ def _overrides(app: FastAPI, session_factory: Factory) -> None:
     app.dependency_overrides[get_pricing_file] = lambda: None
 
 
-async def _seed(factory: Factory) -> uuid.UUID:
+@pytest.fixture
+async def client(actors: Actors) -> AsyncClient:
+    """Authenticated as staff user A; shadows the anonymous root client."""
+    return await actors.client("staff_a")
+
+
+@pytest.fixture
+def owner(actors: Actors) -> Principal:
+    return actors.principal("staff_a")
+
+
+async def _seed(factory: Factory, owner: Principal) -> uuid.UUID:
     experiment_id = await seed(
         factory,
         [
@@ -45,6 +58,7 @@ async def _seed(factory: Factory) -> uuid.UUID:
             Row(3, status="failed", error_kind="timeout"),
         ],
         evaluators=("ex",),
+        owner=owner,
     )
     async with factory() as session:
         from sqlalchemy import select, update
@@ -65,8 +79,9 @@ async def test_sentinels_never_logged(
     client: AsyncClient,
     session_factory: Factory,
     caplog: pytest.LogCaptureFixture,
+    owner: Principal,
 ) -> None:
-    experiment_id = await _seed(session_factory)
+    experiment_id = await _seed(session_factory, owner)
     caplog.set_level(logging.DEBUG)
     base = f"/api/v1/experiments/{experiment_id}"
     responses = [

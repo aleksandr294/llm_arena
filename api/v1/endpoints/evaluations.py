@@ -4,6 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from api.v1.utils import get_principal
+from components.core.access import Principal
 from components.core.database import get_session_factory
 from components.evaluation.schemas import (
     EvaluationEnqueueSchema,
@@ -41,6 +43,7 @@ def get_evaluation_service(
 
 
 ServiceDep = Annotated[EvaluationService, Depends(get_evaluation_service)]
+PrincipalDep = Annotated[Principal, Depends(get_principal)]
 
 
 def _not_found() -> HTTPException:
@@ -55,12 +58,13 @@ def _not_found() -> HTTPException:
 async def evaluate_experiment(
     experiment_id: uuid.UUID,
     service: ServiceDep,
+    principal: PrincipalDep,
     enqueue: Annotated[EnqueueResults, Depends(get_enqueue)],
 ) -> EvaluationEnqueueSchema:
     """Enqueue evaluation of succeeded results that lack some configured
     evaluation. 202 means submitted, not evaluated."""
     try:
-        result_ids, remaining = await service.backfill(experiment_id)
+        result_ids, remaining = await service.backfill(principal, experiment_id)
     except ExperimentNotFoundError:
         raise _not_found() from None
     if result_ids:
@@ -77,10 +81,10 @@ async def evaluate_experiment(
     response_model=EvaluationSummarySchema,
 )
 async def evaluation_summary(
-    experiment_id: uuid.UUID, service: ServiceDep
+    experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> EvaluationSummarySchema:
     try:
-        return await service.summary(experiment_id)
+        return await service.summary(principal, experiment_id)
     except ExperimentNotFoundError:
         raise _not_found() from None
 
@@ -89,6 +93,7 @@ async def evaluation_summary(
 async def list_evaluations(
     experiment_id: uuid.UUID,
     service: ServiceDep,
+    principal: PrincipalDep,
     limit: Limit = 50,
     offset: Offset = 0,
     evaluator_id: str | None = None,
@@ -96,6 +101,7 @@ async def list_evaluations(
 ) -> EvaluationPageSchema:
     try:
         items, total = await service.list_evaluations(
+            principal,
             experiment_id,
             limit,
             offset,

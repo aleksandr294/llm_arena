@@ -194,6 +194,8 @@ def test_read_schema_parses_stored_config() -> None:
             "id": uuid.uuid4(),
             "name": "e",
             "dataset_id": uuid.uuid4(),
+            "organization_id": uuid.uuid4(),
+            "owner_id": None,
             "status": "pending",
             "prompt_template": "{input}",
             "config": _config(max_attempts=2),

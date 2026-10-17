@@ -301,7 +301,9 @@ class ExperimentRunner:
             experiments = ExperimentRepository(session)
             results = ExperimentResultRepository(session)
             # Experiment lock first, like every other writer.
-            experiment = await experiments.get_for_update(work.experiment_id)
+            experiment = await experiments.get_for_update_unscoped(
+                work.experiment_id
+            )
             written = await results.write_outcome(
                 result_id,
                 outcome.status,

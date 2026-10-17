@@ -13,7 +13,9 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.metrics import get_factory, get_pricing_file
+from components.core.access import Principal
 from components.core.database import get_session
+from tests.access import Actors
 from tests.metrics.helpers import Row, seed
 
 pytestmark = pytest.mark.integration
@@ -30,6 +32,17 @@ def _overrides(app: FastAPI, session_factory: Factory) -> None:
     app.dependency_overrides[get_session] = session_override
     app.dependency_overrides[get_factory] = lambda: session_factory
     app.dependency_overrides[get_pricing_file] = lambda: None
+
+
+@pytest.fixture
+async def client(actors: Actors) -> AsyncClient:
+    """Authenticated as staff user A; shadows the anonymous root client."""
+    return await actors.client("staff_a")
+
+
+@pytest.fixture
+def owner(actors: Actors) -> Principal:
+    return actors.principal("staff_a")
 
 
 def url(experiment_id: uuid.UUID, suffix: str) -> str:
@@ -58,12 +71,20 @@ def _rows() -> list[Row]:
     ]
 
 
-async def _seed(factory: Factory) -> uuid.UUID:
-    return await seed(factory, _rows(), models=("m1", "m2"), evaluators=("ex",))
+async def _seed(factory: Factory, owner: Principal) -> uuid.UUID:
+    return await seed(
+        factory,
+        _rows(),
+        models=("m1", "m2"),
+        evaluators=("ex",),
+        owner=owner,
+    )
 
 
-async def test_summary(client: AsyncClient, session_factory: Factory) -> None:
-    experiment_id = await _seed(session_factory)
+async def test_summary(
+    client: AsyncClient, session_factory: Factory, owner: Principal
+) -> None:
+    experiment_id = await _seed(session_factory, owner)
     response = await client.get(url(experiment_id, "summary"))
     assert response.status_code == 200
     body = response.json()
@@ -79,9 +100,9 @@ async def test_summary(client: AsyncClient, session_factory: Factory) -> None:
 
 
 async def test_comparison_matches_stored_rows(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    experiment_id = await _seed(session_factory)
+    experiment_id = await _seed(session_factory, owner)
     response = await client.get(url(experiment_id, "comparison"))
     assert response.status_code == 200
     targets = {t["model"]: t for t in response.json()["targets"]}
@@ -117,9 +138,9 @@ async def test_comparison_matches_stored_rows(
 
 
 async def test_cases_pagination_and_response_rules(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    experiment_id = await _seed(session_factory)
+    experiment_id = await _seed(session_factory, owner)
     page = (
         await client.get(url(experiment_id, "cases"), params={"limit": 2})
     ).json()
@@ -174,8 +195,9 @@ async def test_bad_query_values_are_422(
     session_factory: Factory,
     suffix: str,
     params: dict[str, object],
+    owner: Principal,
 ) -> None:
-    experiment_id = await _seed(session_factory)
+    experiment_id = await _seed(session_factory, owner)
     response = await client.get(url(experiment_id, suffix), params=params)  # type: ignore[arg-type]
     assert response.status_code == 422
 
@@ -186,9 +208,9 @@ async def test_invalid_experiment_id_is_422(client: AsyncClient) -> None:
 
 
 async def test_json_export_defaults_and_headers(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    experiment_id = await _seed(session_factory)
+    experiment_id = await _seed(session_factory, owner)
     response = await client.get(url(experiment_id, "export"))
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json"
@@ -209,9 +231,9 @@ async def test_json_export_defaults_and_headers(
 
 
 async def test_csv_export_defaults_and_headers(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    experiment_id = await _seed(session_factory)
+    experiment_id = await _seed(session_factory, owner)
     response = await client.get(
         url(experiment_id, "export"), params={"format": "csv"}
     )
@@ -236,6 +258,7 @@ async def test_pricing_file_dependency_feeds_cost(
     client: AsyncClient,
     session_factory: Factory,
     tmp_path: Path,
+    owner: Principal,
 ) -> None:
     path = tmp_path / "pricing.json"
     path.write_text(
@@ -255,7 +278,7 @@ async def test_pricing_file_dependency_feeds_cost(
         )
     )
     app.dependency_overrides[get_pricing_file] = lambda: str(path)
-    experiment_id = await _seed(session_factory)
+    experiment_id = await _seed(session_factory, owner)
     body = (await client.get(url(experiment_id, "comparison"))).json()
     assert body["pricing"] == {"version": "v9", "currency": "USD"}
     m1 = next(t for t in body["targets"] if t["model"] == "m1")
@@ -263,3 +286,41 @@ async def test_pricing_file_dependency_feeds_cost(
     assert m1["cost"]["pricing_version"] == "v9"
     m2 = next(t for t in body["targets"] if t["model"] == "m2")
     assert m2["cost"]["priced"] is False
+
+
+ACTORS = [
+    ("staff_a", True),
+    ("staff_b", False),
+    ("admin", True),
+    ("admin_other", False),
+    ("superadmin", True),
+]
+
+
+@pytest.mark.parametrize(("name", "allowed"), ACTORS)
+async def test_metrics_and_export_are_scoped_by_experiment(
+    actors: Actors, session_factory: Factory, name: str, allowed: bool
+) -> None:
+    experiment_id = await _seed(session_factory, actors.principal("staff_a"))
+    caller = await actors.client(name)
+    for suffix in (
+        "summary",
+        "comparison",
+        "cases",
+        "cases?include_responses=true",
+        "export",
+        "export?format=json",
+        "export?format=csv",
+        "export?format=csv&include_responses=true",
+    ):
+        response = await caller.get(url(experiment_id, suffix))
+        if allowed:
+            assert response.status_code == 200, suffix
+        else:
+            unknown = await caller.get(url(uuid.uuid4(), suffix))
+            assert response.status_code == 404, suffix
+            assert response.json() == unknown.json()
+            # Nothing was streamed: a plain error body, no attachment.
+            assert "content-disposition" not in response.headers
+            assert response.headers["content-type"] == "application/json"
+            assert "SECRET" not in response.text

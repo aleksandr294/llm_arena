@@ -4,6 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.v1.utils import CreatedRangeSchema, get_created_range, get_principal
+from components.core.access import OrganizationRequiredError, Principal
 from components.core.database import get_session
 from components.datasets.schemas import (
     DatasetCreateSchema,
@@ -29,6 +31,7 @@ def get_dataset_service(
 
 
 ServiceDep = Annotated[DatasetService, Depends(get_dataset_service)]
+PrincipalDep = Annotated[Principal, Depends(get_principal)]
 
 
 def _not_found() -> HTTPException:
@@ -39,16 +42,32 @@ def _not_found() -> HTTPException:
     "", status_code=status.HTTP_201_CREATED, response_model=DatasetSchema
 )
 async def create_dataset(
-    body: DatasetCreateSchema, service: ServiceDep
+    body: DatasetCreateSchema, service: ServiceDep, principal: PrincipalDep
 ) -> DatasetSchema:
-    return DatasetSchema.model_validate(await service.create_dataset(body))
+    try:
+        dataset = await service.create_dataset(principal, body)
+    except OrganizationRequiredError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from None
+    return DatasetSchema.model_validate(dataset)
 
 
 @router.get("", response_model=DatasetPageSchema)
 async def list_datasets(
-    service: ServiceDep, limit: Limit = 50, offset: Offset = 0
+    service: ServiceDep,
+    principal: PrincipalDep,
+    created: Annotated[CreatedRangeSchema, Depends(get_created_range)],
+    limit: Limit = 50,
+    offset: Offset = 0,
+    owner_id: uuid.UUID | None = None,
 ) -> DatasetPageSchema:
-    items, total = await service.list_datasets(limit, offset)
+    items, total = await service.list_datasets(
+        principal,
+        limit,
+        offset,
+        created.created_from,
+        created.created_to,
+        owner_id,
+    )
     return DatasetPageSchema(
         items=[DatasetSchema.model_validate(i) for i in items],
         total=total,
@@ -59,10 +78,10 @@ async def list_datasets(
 
 @router.get("/{dataset_id}", response_model=DatasetDetailSchema)
 async def get_dataset(
-    dataset_id: uuid.UUID, service: ServiceDep
+    dataset_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> DatasetDetailSchema:
     try:
-        dataset, case_count = await service.get_dataset(dataset_id)
+        dataset, case_count = await service.get_dataset(principal, dataset_id)
     except DatasetNotFoundError:
         raise _not_found() from None
     return DatasetDetailSchema(
@@ -77,10 +96,13 @@ async def get_dataset(
     response_model=TestCaseSchema,
 )
 async def add_case(
-    dataset_id: uuid.UUID, body: TestCaseCreateSchema, service: ServiceDep
+    dataset_id: uuid.UUID,
+    body: TestCaseCreateSchema,
+    service: ServiceDep,
+    principal: PrincipalDep,
 ) -> TestCaseSchema:
     try:
-        case = await service.add_case(dataset_id, body)
+        case = await service.add_case(principal, dataset_id, body)
     except DatasetNotFoundError:
         raise _not_found() from None
     return TestCaseSchema.model_validate(case)
@@ -90,11 +112,14 @@ async def add_case(
 async def list_cases(
     dataset_id: uuid.UUID,
     service: ServiceDep,
+    principal: PrincipalDep,
     limit: Limit = 50,
     offset: Offset = 0,
 ) -> TestCasePageSchema:
     try:
-        items, total = await service.list_cases(dataset_id, limit, offset)
+        items, total = await service.list_cases(
+            principal, dataset_id, limit, offset
+        )
     except DatasetNotFoundError:
         raise _not_found() from None
     return TestCasePageSchema(

@@ -13,6 +13,7 @@ from taskiq import InMemoryBroker
 from components.experiments.models import ExperimentStatus, ResultStatus
 from components.experiments.runner import ExperimentRunner
 from components.experiments.service import ExperimentService
+from tests.access import ROOT
 from tests.experiments.helpers import (
     Factory,
     FakeLLM,
@@ -61,7 +62,7 @@ async def test_started_experiment_executes_to_final_status(
     experiment_id = await make_experiment(session_factory, cases=3)
     async with session_factory() as s:
         service = ExperimentService(s, llm.as_service(), enqueue)
-        assert await service.start(experiment_id) == 3
+        assert await service.start(ROOT, experiment_id) == 3
     await memory.wait_all()
     await memory.shutdown()
 
@@ -90,7 +91,7 @@ async def test_enqueueing_alone_leaves_results_pending(
     experiment_id = await make_experiment(session_factory, cases=2)
     async with session_factory() as s:
         service = ExperimentService(s, llm.as_service(), enqueue)
-        await service.start(experiment_id)
+        await service.start(ROOT, experiment_id)
 
     assert len(sent) == 2
     assert llm.calls == []

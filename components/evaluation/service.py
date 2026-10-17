@@ -11,6 +11,7 @@ import uuid
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from components.core.access import Principal
 from components.evaluation.evaluators import EVALUATORS, build_evaluator
 from components.evaluation.repository import EvaluationRepository
 from components.evaluation.schemas import (
@@ -40,9 +41,14 @@ class EvaluationService:
         self._factory = session_factory
 
     async def _config(
-        self, session: AsyncSession, experiment_id: uuid.UUID
+        self,
+        session: AsyncSession,
+        principal: Principal,
+        experiment_id: uuid.UUID,
     ) -> EvaluatorConfigSchema:
-        experiment = await ExperimentRepository(session).get(experiment_id)
+        experiment = await ExperimentRepository(session).get_scoped(
+            experiment_id, principal
+        )
         if experiment is None:
             raise ExperimentNotFoundError(experiment_id)
         return self._parse(experiment.evaluator_config, experiment_id)
@@ -122,14 +128,17 @@ class EvaluationService:
         return inserted
 
     async def backfill(
-        self, experiment_id: uuid.UUID, limit: int | None = None
+        self,
+        principal: Principal,
+        experiment_id: uuid.UUID,
+        limit: int | None = None,
     ) -> tuple[list[uuid.UUID], int]:
         """At most ``limit`` ids of succeeded results lacking some
         configured evaluation, for the caller to enqueue, and how many
         still lack one after this batch. Empty without evaluators."""
         limit = BACKFILL_BATCH_SIZE if limit is None else limit
         async with self._factory() as session:
-            config = await self._config(session, experiment_id)
+            config = await self._config(session, principal, experiment_id)
             repository = EvaluationRepository(session)
             evaluator_ids = [e.id for e in config.evaluators]
             ids = await repository.list_unevaluated_result_ids(
@@ -143,6 +152,7 @@ class EvaluationService:
 
     async def list_evaluations(
         self,
+        principal: Principal,
         experiment_id: uuid.UUID,
         limit: int,
         offset: int,
@@ -150,7 +160,8 @@ class EvaluationService:
         status: str | None = None,
     ) -> tuple[list[EvaluationResultSchema], int]:
         async with self._factory() as session:
-            if await ExperimentRepository(session).get(experiment_id) is None:
+            experiments = ExperimentRepository(session)
+            if await experiments.get_scoped(experiment_id, principal) is None:
                 raise ExperimentNotFoundError(experiment_id)
             rows, total = await EvaluationRepository(session).list_page(
                 experiment_id, limit, offset, evaluator_id, status
@@ -161,10 +172,10 @@ class EvaluationService:
         return items, total
 
     async def summary(
-        self, experiment_id: uuid.UUID
+        self, principal: Principal, experiment_id: uuid.UUID
     ) -> EvaluationSummarySchema:
         async with self._factory() as session:
-            config = await self._config(session, experiment_id)
+            config = await self._config(session, principal, experiment_id)
             repository = EvaluationRepository(session)
             counts = await repository.outcome_counts(experiment_id)
             unevaluated = await repository.count_unevaluated_results(

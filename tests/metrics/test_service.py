@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from components.experiments.service import ExperimentNotFoundError
 from components.metrics.schemas import ComparisonSchema
 from components.metrics.service import MetricsService
+from tests.access import ROOT
 from tests.metrics.helpers import Row, seed
 
 pytestmark = pytest.mark.integration
@@ -45,7 +46,9 @@ async def _comparison(
     factory: Factory, experiment_id: uuid.UUID, pricing: str | None = None
 ) -> ComparisonSchema:
     async with factory() as session:
-        return await MetricsService(session, pricing).comparison(experiment_id)
+        return await MetricsService(session, pricing).comparison(
+            ROOT, experiment_id
+        )
 
 
 async def test_summary_mixed_statuses(session_factory: Factory) -> None:
@@ -55,7 +58,7 @@ async def test_summary_mixed_statuses(session_factory: Factory) -> None:
     ]
     experiment_id = await seed(session_factory, rows)
     async with session_factory() as session:
-        summary = await MetricsService(session).summary(experiment_id)
+        summary = await MetricsService(session).summary(ROOT, experiment_id)
     assert summary.counts.succeeded == 3
     assert summary.counts.failed == 1
     assert summary.counts.pending == 2
@@ -69,7 +72,7 @@ async def test_summary_finished(session_factory: Factory) -> None:
         session_factory, [Row(1), Row(2, status="failed")]
     )
     async with session_factory() as session:
-        summary = await MetricsService(session).summary(experiment_id)
+        summary = await MetricsService(session).summary(ROOT, experiment_id)
     assert summary.finished is True
 
 
@@ -260,7 +263,7 @@ async def test_cases_view_without_and_with_responses(
     )
     async with session_factory() as session:
         service = MetricsService(session)
-        page = await service.cases(experiment_id, limit=2, offset=0)
+        page = await service.cases(ROOT, experiment_id, limit=2, offset=0)
         assert (page.total, page.limit, page.offset) == (3, 2, 0)
         assert [c.case_position for c in page.items] == [1, 2]
         for case in page.items:
@@ -269,14 +272,14 @@ async def test_cases_view_without_and_with_responses(
             assert case.results[0].evaluations[0].status == "passed"
             assert case.results[0].input_tokens == 1
         full = await service.cases(
-            experiment_id, limit=50, offset=2, include_responses=True
+            ROOT, experiment_id, limit=50, offset=2, include_responses=True
         )
         assert [c.case_position for c in full.items] == [3]
         assert [r.response_text for r in full.items[0].results] == [
             "resp-3-m1",
             "resp-3-m2",
         ]
-        beyond = await service.cases(experiment_id, limit=5, offset=10)
+        beyond = await service.cases(ROOT, experiment_id, limit=5, offset=10)
         assert beyond.items == [] and beyond.total == 3
 
 
@@ -285,8 +288,8 @@ async def test_unknown_experiment(session_factory: Factory) -> None:
         service = MetricsService(session)
         missing = uuid.uuid4()
         with pytest.raises(ExperimentNotFoundError):
-            await service.summary(missing)
+            await service.summary(ROOT, missing)
         with pytest.raises(ExperimentNotFoundError):
-            await service.comparison(missing)
+            await service.comparison(ROOT, missing)
         with pytest.raises(ExperimentNotFoundError):
-            await service.cases(missing, 10, 0)
+            await service.cases(ROOT, missing, 10, 0)

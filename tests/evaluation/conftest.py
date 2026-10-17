@@ -10,8 +10,16 @@ from components.core.database import Base, create_engine
 from components.datasets.models import Dataset, TestCase
 from components.evaluation.models import EvaluationResult
 from components.experiments.models import Experiment, ExperimentResult
+from tests.access import ACCESS_MODELS
 
-_MODELS = (Dataset, TestCase, Experiment, ExperimentResult, EvaluationResult)
+_MODELS = (
+    *ACCESS_MODELS,
+    Dataset,
+    TestCase,
+    Experiment,
+    ExperimentResult,
+    EvaluationResult,
+)
 
 
 @pytest.fixture
