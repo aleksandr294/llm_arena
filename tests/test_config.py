@@ -79,3 +79,19 @@ def test_llm_max_concurrency_default_and_minimum(
     monkeypatch.setenv("LLM_MAX_CONCURRENCY", "0")
     with pytest.raises(ValidationError):
         SettingsSchema(_env_file=None)
+
+
+def test_pricing_file_optional_and_blank_is_unset(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DB_URL)
+    monkeypatch.setenv("RABBITMQ_URL", MQ_URL)
+    monkeypatch.delenv("PRICING_FILE", raising=False)
+    assert SettingsSchema(_env_file=None).pricing_file is None
+    monkeypatch.setenv("PRICING_FILE", "  ")
+    assert SettingsSchema(_env_file=None).pricing_file is None
+    monkeypatch.setenv("PRICING_FILE", "docs/pricing.example.json")
+    assert (
+        SettingsSchema(_env_file=None).pricing_file
+        == "docs/pricing.example.json"
+    )
