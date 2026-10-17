@@ -95,3 +95,73 @@ def test_pricing_file_optional_and_blank_is_unset(
         SettingsSchema(_env_file=None).pricing_file
         == "docs/pricing.example.json"
     )
+
+
+def _base_env(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", DB_URL)
+    monkeypatch.setenv("RABBITMQ_URL", MQ_URL)
+
+
+def test_jwt_secret_is_required(monkeypatch: MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    assert "jwt_secret_key" in str(exc.value)
+
+
+@pytest.mark.parametrize("secret", ["", "short-secret-value", "x" * 31])
+def test_jwt_secret_too_short_is_rejected_without_echo(
+    monkeypatch: MonkeyPatch, secret: str
+) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv("JWT_SECRET_KEY", secret)
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    message = str(exc.value)
+    assert "jwt_secret_key" in message
+    if secret:
+        assert secret not in message
+
+
+def test_jwt_secret_placeholder_from_env_example_is_rejected(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    placeholder = ""
+    with open(".env.example") as f:
+        for line in f:
+            if line.startswith("JWT_SECRET_KEY="):
+                placeholder = line.split("=", 1)[1].strip()
+    assert placeholder
+    _base_env(monkeypatch)
+    monkeypatch.setenv("JWT_SECRET_KEY", placeholder)
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    assert "jwt_secret_key" in str(exc.value)
+    assert placeholder not in str(exc.value)
+
+
+def test_jwt_settings_defaults_and_masking(monkeypatch: MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    secret = "a-valid-secret-with-at-least-32-characters"
+    monkeypatch.setenv("JWT_SECRET_KEY", secret)
+    for name in (
+        "JWT_ACCESS_TTL_SECONDS",
+        "JWT_REFRESH_TTL_SECONDS",
+        "JWT_ISSUER",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = SettingsSchema(_env_file=None)
+
+    assert settings.jwt_access_ttl_seconds == 900
+    assert settings.jwt_refresh_ttl_seconds == 604800
+    assert settings.jwt_issuer == "llm-arena"
+    rendered = repr(settings) + str(settings) + settings.model_dump_json()
+    assert secret not in rendered

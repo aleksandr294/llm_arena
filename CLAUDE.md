@@ -73,6 +73,7 @@ llm-arena/
 │           └── service.py       # LLMService
 ├── migrations/                  # Alembic
 ├── main.py                      # python main.py API
+├── cli.py                       # python cli.py create-superadmin
 ├── taskiq_app.py                     
 ├── conftest.py                     
 ├── .env.example

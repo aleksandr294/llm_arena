@@ -4,6 +4,7 @@ x-app: &app
   environment:
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+    JWT_SECRET_KEY: ${JWT_SECRET_KEY}
   depends_on:
     postgres:
       condition: service_healthy
