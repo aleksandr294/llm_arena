@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import func, select, update
 
+from components.core.access import Principal, scope_clause
 from components.core.repository import BaseRepository
 from components.experiments.logic import derive_final_status
 from components.experiments.models import (
@@ -20,31 +21,92 @@ from components.experiments.models import (
 # headroom up to 1800 s.
 LEASE_SECONDS = 1800
 INSERT_BATCH_SIZE = 500
+_USE_SCOPED = "use the scoped method"
 
 
 class ExperimentRepository(BaseRepository[Experiment]):
+    """Scoped methods take a ``Principal`` and treat out-of-scope rows as
+    missing. The ``*_unscoped`` methods are for workers and the runner,
+    which have no user context; request handlers must not call them. The
+    inherited unscoped ``get``/``delete``/``list`` are disabled."""
+
     model = Experiment
 
+    async def get(self, entity_id: Any) -> Experiment | None:
+        raise NotImplementedError(_USE_SCOPED)
+
+    async def delete(self, entity: Experiment) -> None:
+        raise NotImplementedError(_USE_SCOPED)
+
+    async def list(
+        self, limit: int = 100, offset: int = 0
+    ) -> Sequence[Experiment]:
+        raise NotImplementedError(_USE_SCOPED)
+
     async def list_page(
-        self, limit: int, offset: int
+        self,
+        principal: Principal,
+        limit: int,
+        offset: int,
+        status: str | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        owner_id: uuid.UUID | None = None,
     ) -> tuple[Sequence[Experiment], int]:
-        """Return one page ordered by ``(created_at, id)`` and the total."""
+        """Return one visible page ordered by ``(created_at, id)`` and the
+        total of visible experiments matching the filters (bounds
+        inclusive). ``owner_id`` only narrows the scope."""
+        conditions = [scope_clause(Experiment, principal)]
+        if status is not None:
+            conditions.append(Experiment.status == status)
+        if created_from is not None:
+            conditions.append(Experiment.created_at >= created_from)
+        if created_to is not None:
+            conditions.append(Experiment.created_at <= created_to)
+        if owner_id is not None:
+            conditions.append(Experiment.owner_id == owner_id)
         total = await self.session.scalar(
-            select(func.count()).select_from(Experiment)
+            select(func.count()).select_from(Experiment).where(*conditions)
         )
         result = await self.session.scalars(
             select(Experiment)
+            .where(*conditions)
             .order_by(Experiment.created_at, Experiment.id)
             .limit(limit)
             .offset(offset)
         )
         return result.all(), total or 0
 
+    async def get_scoped(
+        self, experiment_id: uuid.UUID, principal: Principal
+    ) -> Experiment | None:
+        return await self.session.scalar(
+            select(Experiment).where(
+                Experiment.id == experiment_id,
+                scope_clause(Experiment, principal),
+            )
+        )
+
     async def get_for_update(
+        self, experiment_id: uuid.UUID, principal: Principal
+    ) -> Experiment | None:
+        """Lock a visible experiment row. Every writer that changes
+        experiment or result state locks this row first, which avoids
+        deadlocks."""
+        return await self.session.scalar(
+            select(Experiment)
+            .where(
+                Experiment.id == experiment_id,
+                scope_clause(Experiment, principal),
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
+    async def get_for_update_unscoped(
         self, experiment_id: uuid.UUID
     ) -> Experiment | None:
-        """Lock the experiment row. Every writer that changes experiment or
-        result state locks this row first, which avoids deadlocks."""
+        """Like ``get_for_update`` but ignoring ownership (runner)."""
         return await self.session.scalar(
             select(Experiment)
             .where(Experiment.id == experiment_id)

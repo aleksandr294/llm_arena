@@ -20,6 +20,7 @@ from components.experiments.repository import (
     ExperimentRepository,
     ExperimentResultRepository,
 )
+from tests.access import ROOT, seed_organization
 
 pytestmark = pytest.mark.integration
 
@@ -29,7 +30,9 @@ Factory = async_sessionmaker[AsyncSession]
 async def _experiment(
     session: AsyncSession, cases: int = 3, targets: tuple[str, ...] = ("m1",)
 ) -> tuple[Experiment, list[ExperimentResult]]:
-    dataset = Dataset(name="d")
+    dataset = Dataset(
+        name="d", organization_id=await seed_organization(session)
+    )
     session.add(dataset)
     await session.flush()
     case_rows = [
@@ -40,6 +43,7 @@ async def _experiment(
     experiment = Experiment(
         name="e",
         dataset_id=dataset.id,
+        organization_id=dataset.organization_id,
         prompt_template="{input}",
         config={"targets": []},
         evaluator_config={},
@@ -126,8 +130,8 @@ async def test_experiment_page_ordering(session_factory: Factory) -> None:
         for _ in range(3):
             await _experiment(s, cases=1)
         repo = ExperimentRepository(s)
-        items, total = await repo.list_page(limit=2, offset=0)
-        rest, _ = await repo.list_page(limit=2, offset=2)
+        items, total = await repo.list_page(ROOT, limit=2, offset=0)
+        rest, _ = await repo.list_page(ROOT, limit=2, offset=2)
         keys = [(e.created_at, e.id) for e in [*items, *rest]]
         assert total == 3 and keys == sorted(keys) and len(set(keys)) == 3
 
@@ -325,17 +329,23 @@ async def test_get_for_update_blocks_second_locker(
         exp_id = experiment.id
 
     async with session_factory() as first, session_factory() as second:
-        locked = await ExperimentRepository(first).get_for_update(exp_id)
+        locked = await ExperimentRepository(first).get_for_update_unscoped(
+            exp_id
+        )
         assert locked is not None
         await second.execute(text("SET lock_timeout = '300ms'"))
         with pytest.raises(Exception, match="lock"):
-            await ExperimentRepository(second).get_for_update(exp_id)
+            await ExperimentRepository(second).get_for_update_unscoped(exp_id)
         await second.rollback()
         await first.commit()
-        again = await ExperimentRepository(second).get_for_update(exp_id)
+        again = await ExperimentRepository(second).get_for_update_unscoped(
+            exp_id
+        )
         assert again is not None
         assert (
-            await ExperimentRepository(first).get_for_update(uuid.uuid4())
+            await ExperimentRepository(first).get_for_update_unscoped(
+                uuid.uuid4()
+            )
             is None
         )
 

@@ -9,10 +9,12 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.endpoints.evaluations import get_enqueue, get_factory
+from components.core.access import Principal
 from components.evaluation import service as service_module
 from components.evaluation.repository import EvaluationRepository
 from components.evaluation.service import EvaluationService
 from components.experiments.models import ResultStatus
+from tests.access import Actors
 from tests.evaluation.test_repository import Factory, _setup
 from tests.experiments.helpers import Enqueued
 
@@ -42,12 +44,27 @@ def _overrides(
 
 
 async def _make(
-    factory: Factory, config: dict[str, Any] | None = CONFIG
+    factory: Factory,
+    config: dict[str, Any] | None = CONFIG,
+    owner: Principal | None = None,
 ) -> tuple[uuid.UUID, list[uuid.UUID]]:
     async with factory() as session:
-        experiment, results = await _setup(session, evaluator_config=config)
+        experiment, results = await _setup(
+            session, evaluator_config=config, owner=owner
+        )
         await session.commit()
         return experiment.id, [r.id for r in results]
+
+
+@pytest.fixture
+async def client(actors: Actors) -> AsyncClient:
+    """Authenticated as staff user A; shadows the anonymous root client."""
+    return await actors.client("staff_a")
+
+
+@pytest.fixture
+def owner(actors: Actors) -> Principal:
+    return actors.principal("staff_a")
 
 
 def url(experiment_id: uuid.UUID, suffix: str) -> str:
@@ -55,9 +72,12 @@ def url(experiment_id: uuid.UUID, suffix: str) -> str:
 
 
 async def test_evaluate_enqueues_unevaluated_succeeded_results(
-    client: AsyncClient, session_factory: Factory, enqueued: Enqueued
+    client: AsyncClient,
+    session_factory: Factory,
+    enqueued: Enqueued,
+    owner: Principal,
 ) -> None:
-    experiment_id, ids = await _make(session_factory)
+    experiment_id, ids = await _make(session_factory, owner=owner)
     response = await client.post(url(experiment_id, "evaluate"))
     assert response.status_code == 202
     assert response.json() == {
@@ -76,9 +96,12 @@ async def test_evaluate_enqueues_unevaluated_succeeded_results(
 
 
 async def test_evaluate_with_nothing_to_do_returns_zero(
-    client: AsyncClient, session_factory: Factory, enqueued: Enqueued
+    client: AsyncClient,
+    session_factory: Factory,
+    enqueued: Enqueued,
+    owner: Principal,
 ) -> None:
-    experiment_id, ids = await _make(session_factory)
+    experiment_id, ids = await _make(session_factory, owner=owner)
     service = EvaluationService(session_factory)
     for result_id in ids:
         await service.evaluate_result(result_id)
@@ -94,9 +117,10 @@ async def test_evaluate_enqueues_a_bounded_batch(
     session_factory: Factory,
     enqueued: Enqueued,
     monkeypatch: pytest.MonkeyPatch,
+    owner: Principal,
 ) -> None:
     monkeypatch.setattr(service_module, "BACKFILL_BATCH_SIZE", 1)
-    experiment_id, ids = await _make(session_factory)
+    experiment_id, ids = await _make(session_factory, owner=owner)
     body = (await client.post(url(experiment_id, "evaluate"))).json()
     assert (body["enqueued"], body["remaining"]) == (1, 1)
     assert enqueued.flat == [ids[0]]
@@ -108,8 +132,9 @@ async def test_evaluate_without_evaluators_returns_zero(
     session_factory: Factory,
     enqueued: Enqueued,
     config: dict[str, Any] | None,
+    owner: Principal,
 ) -> None:
-    experiment_id, _ = await _make(session_factory, config)
+    experiment_id, _ = await _make(session_factory, config, owner)
     response = await client.post(url(experiment_id, "evaluate"))
     assert response.status_code == 202
     assert response.json()["enqueued"] == 0
@@ -143,9 +168,9 @@ async def test_unknown_experiment_is_404(
     ],
 )
 async def test_list_invalid_query_is_422(
-    client: AsyncClient, session_factory: Factory, query: str
+    client: AsyncClient, session_factory: Factory, query: str, owner: Principal
 ) -> None:
-    experiment_id, _ = await _make(session_factory)
+    experiment_id, _ = await _make(session_factory, owner=owner)
     response = await client.get(url(experiment_id, f"evaluations?{query}"))
     assert response.status_code == 422
 
@@ -166,9 +191,9 @@ async def _evaluate_all(factory: Factory, ids: list[uuid.UUID]) -> None:
 
 
 async def test_list_pagination_filters_and_shape(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    experiment_id, ids = await _make(session_factory)
+    experiment_id, ids = await _make(session_factory, owner=owner)
     await _evaluate_all(session_factory, ids)
 
     body = (await client.get(url(experiment_id, "evaluations"))).json()
@@ -222,9 +247,9 @@ async def test_list_pagination_filters_and_shape(
 
 
 async def test_summary_counts_per_outcome_and_unevaluated(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    experiment_id, ids = await _make(session_factory)
+    experiment_id, ids = await _make(session_factory, owner=owner)
 
     before = (
         await client.get(url(experiment_id, "evaluations/summary"))
@@ -253,17 +278,17 @@ async def test_summary_counts_per_outcome_and_unevaluated(
 
 
 async def test_summary_without_evaluators_is_empty(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    experiment_id, _ = await _make(session_factory, {})
+    experiment_id, _ = await _make(session_factory, {}, owner)
     body = (await client.get(url(experiment_id, "evaluations/summary"))).json()
     assert body == {"evaluators": [], "unevaluated_results": 0}
 
 
 async def test_summary_counts_error_outcomes(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    experiment_id, ids = await _make(session_factory)
+    experiment_id, ids = await _make(session_factory, owner=owner)
     async with session_factory() as session:
         await EvaluationRepository(session).insert_ignore(
             [
@@ -285,15 +310,78 @@ async def test_summary_counts_error_outcomes(
 
 
 async def test_failed_results_never_count_as_unevaluated(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
     async with session_factory() as session:
         experiment, _ = await _setup(
             session,
             statuses=(ResultStatus.FAILED, ResultStatus.CANCELLED),
             evaluator_config=CONFIG,
+            owner=owner,
         )
         await session.commit()
         experiment_id = experiment.id
     body = (await client.get(url(experiment_id, "evaluations/summary"))).json()
     assert body["unevaluated_results"] == 0
+
+
+ACTORS = [
+    ("staff_a", True),
+    ("staff_b", False),
+    ("admin", True),
+    ("admin_other", False),
+    ("superadmin", True),
+]
+
+
+@pytest.mark.parametrize(("name", "allowed"), ACTORS)
+async def test_evaluation_endpoints_are_scoped_by_experiment(
+    actors: Actors,
+    session_factory: Factory,
+    enqueued: Enqueued,
+    name: str,
+    allowed: bool,
+) -> None:
+    experiment_id, _ = await _make(
+        session_factory, owner=actors.principal("staff_a")
+    )
+    caller = await actors.client(name)
+    requests = (
+        ("post", "evaluate"),
+        ("get", "evaluations/summary"),
+        ("get", "evaluations"),
+    )
+    for method, suffix in requests:
+        response = await getattr(caller, method)(url(experiment_id, suffix))
+        if allowed:
+            assert response.status_code in (200, 202), suffix
+        else:
+            unknown = await getattr(caller, method)(url(uuid.uuid4(), suffix))
+            assert response.status_code == 404, suffix
+            assert response.json() == unknown.json()
+    # A denied backfill must not enqueue anything.
+    if allowed:
+        assert enqueued.flat
+    else:
+        assert enqueued.flat == []
+
+
+async def test_legacy_experiment_is_visible_to_admins_only(
+    actors: Actors, session_factory: Factory
+) -> None:
+    async with session_factory() as session:
+        experiment, _ = await _setup(session, evaluator_config=CONFIG)
+        await session.commit()
+        experiment_id = experiment.id
+        org_id = experiment.organization_id
+    # The seeded organization differs from the actors', so only the
+    # superadmin sees it.
+    assert org_id != actors.org_id
+    for name, expected in (
+        ("staff_a", 404),
+        ("admin", 404),
+        ("superadmin", 200),
+    ):
+        caller = await actors.client(name)
+        response = await caller.get(url(experiment_id, "evaluations/summary"))
+        assert response.status_code == expected, name

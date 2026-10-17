@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from sqlalchemy import Text, literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from components.core.access import Principal
 from components.evaluation.models import EvaluationResult
 from components.evaluation.schemas import parse_evaluator_config
 from components.experiments.models import ExperimentResult
@@ -79,16 +80,23 @@ def _evaluator_ids(evaluator_config: dict[str, Any]) -> list[str]:
 
 
 async def prepare_export(
-    factory: Factory, experiment_id: uuid.UUID, pricing_file: str | None
+    factory: Factory,
+    principal: Principal,
+    experiment_id: uuid.UUID,
+    pricing_file: str | None,
 ) -> ExportContext:
-    """Raises ``ExperimentNotFoundError``. The comparison needs the whole
-    experiment, so it is computed once here."""
+    """Raises ``ExperimentNotFoundError`` for a missing experiment or one
+    outside the caller's scope, before anything is streamed. The comparison
+    needs the whole experiment, so it is computed once here. Streaming
+    itself runs on the validated context only."""
     async with factory() as session:
-        experiment = await ExperimentRepository(session).get(experiment_id)
+        experiment = await ExperimentRepository(session).get_scoped(
+            experiment_id, principal
+        )
         if experiment is None:
             raise ExperimentNotFoundError(experiment_id)
         comparison = await MetricsService(session, pricing_file).comparison(
-            experiment_id
+            principal, experiment_id
         )
         header = {
             "experiment": {

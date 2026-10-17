@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from components.core.access import Principal
 from components.datasets.models import Dataset, TestCase
 from components.evaluation.models import EvaluationResult
 from components.evaluation.repository import EvaluationRepository
@@ -15,6 +16,7 @@ from components.experiments.models import (
     ExperimentResult,
     ResultStatus,
 )
+from tests.access import seed_organization
 
 pytestmark = pytest.mark.integration
 
@@ -29,8 +31,18 @@ async def _setup(
         ResultStatus.FAILED,
     ),
     evaluator_config: dict[str, Any] | None = None,
+    owner: Principal | None = None,
 ) -> tuple[Experiment, list[ExperimentResult]]:
-    dataset = Dataset(name="d")
+    """Seed an experiment; without ``owner`` it has no owner (legacy)."""
+    dataset = Dataset(
+        name="d",
+        organization_id=(
+            owner.organization_id
+            if owner and owner.organization_id
+            else await seed_organization(session)
+        ),
+        owner_id=owner.user_id if owner else None,
+    )
     session.add(dataset)
     await session.flush()
     cases = [
@@ -46,6 +58,8 @@ async def _setup(
     experiment = Experiment(
         name="e",
         dataset_id=dataset.id,
+        organization_id=dataset.organization_id,
+        owner_id=dataset.owner_id,
         prompt_template="{input}",
         config={"targets": []},
         evaluator_config=evaluator_config or {},

@@ -14,6 +14,7 @@ from components.evaluation.repository import EvaluationRepository
 from components.evaluation.service import EvaluationService
 from components.experiments.models import ExperimentResult, ResultStatus
 from components.experiments.service import ExperimentNotFoundError
+from tests.access import ROOT
 from tests.evaluation.test_repository import Factory, _setup
 
 pytestmark = pytest.mark.integration
@@ -158,9 +159,9 @@ async def test_backfill_and_summary(session_factory: Factory) -> None:
     async with session_factory() as s:
         experiment_id = (await s.get(ExperimentResult, ids[0])).experiment_id  # type: ignore[union-attr]
 
-    backlog, remaining = await service.backfill(experiment_id)
+    backlog, remaining = await service.backfill(ROOT, experiment_id)
     assert set(backlog) == {ids[0], ids[1]} and remaining == 0
-    summary = await service.summary(experiment_id)
+    summary = await service.summary(ROOT, experiment_id)
     assert summary.unevaluated_results == 2
     assert [e.model_dump() for e in summary.evaluators][0] == {
         "id": "exact",
@@ -173,8 +174,8 @@ async def test_backfill_and_summary(session_factory: Factory) -> None:
     }
 
     await service.evaluate_result(ids[1])
-    assert await service.backfill(experiment_id) == ([ids[0]], 0)
-    summary = await service.summary(experiment_id)
+    assert await service.backfill(ROOT, experiment_id) == ([ids[0]], 0)
+    summary = await service.summary(ROOT, experiment_id)
     assert summary.unevaluated_results == 1
     by_id = {e.id: e for e in summary.evaluators}
     assert (by_id["exact"].failed, by_id["has_r"].passed) == (1, 1)
@@ -187,8 +188,8 @@ async def test_backfill_without_evaluators_is_empty(
     service = EvaluationService(session_factory)
     async with session_factory() as s:
         experiment_id = (await s.get(ExperimentResult, ids[0])).experiment_id  # type: ignore[union-attr]
-    assert await service.backfill(experiment_id) == ([], 0)
-    summary = await service.summary(experiment_id)
+    assert await service.backfill(ROOT, experiment_id) == ([], 0)
+    summary = await service.summary(ROOT, experiment_id)
     assert summary.evaluators == []
     assert summary.unevaluated_results == 0
 
@@ -196,9 +197,9 @@ async def test_backfill_without_evaluators_is_empty(
 async def test_unknown_experiment_raises(session_factory: Factory) -> None:
     service = EvaluationService(session_factory)
     with pytest.raises(ExperimentNotFoundError):
-        await service.backfill(uuid.uuid4())
+        await service.backfill(ROOT, uuid.uuid4())
     with pytest.raises(ExperimentNotFoundError):
-        await service.summary(uuid.uuid4())
+        await service.summary(ROOT, uuid.uuid4())
 
 
 async def test_backfill_is_capped_and_reports_remaining(
@@ -208,7 +209,7 @@ async def test_backfill_is_capped_and_reports_remaining(
     service = EvaluationService(session_factory)
     async with session_factory() as s:
         experiment_id = (await s.get(ExperimentResult, ids[0])).experiment_id  # type: ignore[union-attr]
-    assert await service.backfill(experiment_id, limit=1) == ([ids[0]], 1)
+    assert await service.backfill(ROOT, experiment_id, limit=1) == ([ids[0]], 1)
 
 
 async def test_summary_counts_without_listing_ids(
@@ -224,7 +225,9 @@ async def test_summary_counts_without_listing_ids(
     monkeypatch.setattr(
         EvaluationRepository, "list_unevaluated_result_ids", boom
     )
-    summary = await EvaluationService(session_factory).summary(experiment_id)
+    summary = await EvaluationService(session_factory).summary(
+        ROOT, experiment_id
+    )
     assert summary.unevaluated_results == 2
 
 
@@ -244,7 +247,7 @@ async def test_succeeded_result_without_response_is_stored_as_error(
         ("error", {"reason": "missing_response"})
     ] * 2
     assert await service.backfill(
-        await _experiment_id(session_factory, ids[0])
+        ROOT, await _experiment_id(session_factory, ids[0])
     ) == ([ids[1]], 0)
 
 

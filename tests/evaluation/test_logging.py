@@ -13,12 +13,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.endpoints.evaluations import get_enqueue, get_factory
+from components.core.access import Principal
 from components.datasets.models import TestCase
 from components.evaluation.evaluators import build_evaluator
 from components.evaluation.models import EvaluationResult
 from components.evaluation.schemas import parse_evaluator_config
 from components.evaluation.service import EvaluationService
 from components.experiments.models import ExperimentResult, ResultStatus
+from tests.access import Actors
 from tests.evaluation.test_repository import Factory, _setup
 from tests.experiments.helpers import Enqueued
 
@@ -59,12 +61,26 @@ def _overrides(
     app.dependency_overrides[get_enqueue] = lambda: Enqueued()
 
 
-async def _seed(factory: Factory) -> tuple[uuid.UUID, list[uuid.UUID]]:
+@pytest.fixture
+async def client(actors: Actors) -> AsyncClient:
+    """Authenticated as staff user A; shadows the anonymous root client."""
+    return await actors.client("staff_a")
+
+
+@pytest.fixture
+def owner(actors: Actors) -> Principal:
+    return actors.principal("staff_a")
+
+
+async def _seed(
+    factory: Factory, owner: Principal
+) -> tuple[uuid.UUID, list[uuid.UUID]]:
     async with factory() as session:
         experiment, results = await _setup(
             session,
             statuses=(ResultStatus.SUCCEEDED,) * (len(HOSTILE) + 1),
             evaluator_config=ALL_EVALUATORS,
+            owner=owner,
         )
         for result, text in zip(results, [RESPONSE, *HOSTILE], strict=True):
             result.response_text = text
@@ -80,8 +96,9 @@ async def test_sentinels_never_logged_or_stored(
     client: AsyncClient,
     session_factory: Factory,
     caplog: pytest.LogCaptureFixture,
+    owner: Principal,
 ) -> None:
-    experiment_id, ids = await _seed(session_factory)
+    experiment_id, ids = await _seed(session_factory, owner)
     caplog.set_level(logging.DEBUG)
     service = EvaluationService(session_factory)
     for result_id in ids:

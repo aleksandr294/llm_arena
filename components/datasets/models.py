@@ -16,13 +16,34 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from components.core.database import Base
 
+# The foreign keys below need these tables in the metadata even when only
+# this module is imported.
+from components.organizations import models as _organizations  # noqa: F401
+from components.users import models as _users  # noqa: F401
+
 
 class Dataset(Base):
     __tablename__ = "datasets"
+    __table_args__ = (
+        Index(
+            "ix_datasets_organization_id_created_at",
+            "organization_id",
+            "created_at",
+        ),
+        Index("ix_datasets_owner_id_created_at", "owner_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, default=None)
+    # RESTRICT: organizations and users are deactivated, never deleted.
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT")
+    )
+    # NULL for datasets that predate ownership (legacy rows).
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), default=None
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

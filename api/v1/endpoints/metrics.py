@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from api.v1.utils import get_principal
+from components.core.access import Principal
 from components.core.config import get_settings
 from components.core.database import get_session, get_session_factory
 from components.experiments.service import ExperimentNotFoundError
@@ -47,6 +49,7 @@ def get_metrics_service(
 
 
 ServiceDep = Annotated[MetricsService, Depends(get_metrics_service)]
+PrincipalDep = Annotated[Principal, Depends(get_principal)]
 
 
 def _not_found() -> HTTPException:
@@ -55,20 +58,20 @@ def _not_found() -> HTTPException:
 
 @router.get("/{experiment_id}/summary", response_model=SummarySchema)
 async def metrics_summary(
-    experiment_id: uuid.UUID, service: ServiceDep
+    experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> SummarySchema:
     try:
-        return await service.summary(experiment_id)
+        return await service.summary(principal, experiment_id)
     except ExperimentNotFoundError:
         raise _not_found() from None
 
 
 @router.get("/{experiment_id}/comparison", response_model=ComparisonSchema)
 async def metrics_comparison(
-    experiment_id: uuid.UUID, service: ServiceDep
+    experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> ComparisonSchema:
     try:
-        return await service.comparison(experiment_id)
+        return await service.comparison(principal, experiment_id)
     except ExperimentNotFoundError:
         raise _not_found() from None
 
@@ -77,13 +80,14 @@ async def metrics_comparison(
 async def metrics_cases(
     experiment_id: uuid.UUID,
     service: ServiceDep,
+    principal: PrincipalDep,
     limit: Limit = 50,
     offset: Offset = 0,
     include_responses: bool = False,
 ) -> CasePageSchema:
     try:
         return await service.cases(
-            experiment_id, limit, offset, include_responses
+            principal, experiment_id, limit, offset, include_responses
         )
     except ExperimentNotFoundError:
         raise _not_found() from None
@@ -92,6 +96,7 @@ async def metrics_cases(
 @router.get("/{experiment_id}/export")
 async def export_experiment(
     experiment_id: uuid.UUID,
+    principal: PrincipalDep,
     factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_factory)],
     pricing_file: Annotated[str | None, Depends(get_pricing_file)],
     export_format: Annotated[
@@ -103,7 +108,9 @@ async def export_experiment(
     byte, so an unknown experiment is a plain 404. A failure after that
     truncates the stream (status 200 is already sent)."""
     try:
-        context = await prepare_export(factory, experiment_id, pricing_file)
+        context = await prepare_export(
+            factory, principal, experiment_id, pricing_file
+        )
     except ExperimentNotFoundError:
         raise _not_found() from None
     is_json = export_format is ExportFormat.JSON

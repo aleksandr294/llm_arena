@@ -6,9 +6,11 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from components.core.access import Principal
 from components.datasets.models import Dataset, TestCase
 from components.evaluation.models import EvaluationResult
 from components.experiments.models import Experiment, ExperimentResult
+from tests.access import seed_principal
 
 Factory = async_sessionmaker[AsyncSession]
 
@@ -40,9 +42,17 @@ async def seed(
     rows: list[Row],
     models: tuple[str, ...] = ("m1",),
     evaluators: tuple[str, ...] = (),
+    owner: Principal | None = None,
 ) -> uuid.UUID:
+    """Store an experiment owned by ``owner`` (a new staff user by
+    default)."""
+    owner = owner or await seed_principal(factory)
     async with factory() as session:
-        dataset = Dataset(name="d")
+        dataset = Dataset(
+            name="d",
+            organization_id=owner.organization_id,
+            owner_id=owner.user_id,
+        )
         session.add(dataset)
         await session.flush()
         cases = {
@@ -58,6 +68,8 @@ async def seed(
         experiment = Experiment(
             name="e",
             dataset_id=dataset.id,
+            organization_id=dataset.organization_id,
+            owner_id=owner.user_id,
             status="completed",
             prompt_template="{input}",
             config={"targets": targets(*models)},

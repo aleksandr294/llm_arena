@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from components.core.access import Principal
 from components.datasets.models import Dataset, TestCase
 from components.experiments.schemas import (
     ExperimentConfigSchema,
@@ -25,6 +26,7 @@ from components.third_party.llm.service import (
     LLMService,
     ProviderNotConfiguredError,
 )
+from tests.access import ROOT, seed_principal
 
 Factory = async_sessionmaker[AsyncSession]
 
@@ -122,9 +124,17 @@ class Enqueued:
         return [i for batch in self.batches for i in batch]
 
 
-async def make_dataset(factory: Factory, cases: int = 3) -> uuid.UUID:
+async def make_dataset(
+    factory: Factory, cases: int = 3, owner: Principal | None = None
+) -> uuid.UUID:
+    """A dataset owned by ``owner`` (a new staff user by default)."""
+    owner = owner or await seed_principal(factory)
     async with factory() as session:
-        dataset = Dataset(name="d")
+        dataset = Dataset(
+            name="d",
+            organization_id=owner.organization_id,
+            owner_id=owner.user_id,
+        )
         session.add(dataset)
         await session.flush()
         session.add_all(
@@ -168,13 +178,15 @@ async def make_experiment(
     max_attempts: int = 3,
     start: bool = False,
     enqueued: Enqueued | None = None,
+    owner: Principal | None = None,
 ) -> uuid.UUID:
-    dataset_id = await make_dataset(factory, cases)
+    owner = owner or await seed_principal(factory)
+    dataset_id = await make_dataset(factory, cases, owner)
     enqueue = enqueued or Enqueued()
     async with factory() as session:
         service = ExperimentService(session, FakeLLM().as_service(), enqueue)
         experiment = await service.create(
-            create_data(dataset_id, models, max_attempts)
+            owner, create_data(dataset_id, models, max_attempts)
         )
         await session.commit()
         experiment_id = experiment.id
@@ -183,5 +195,5 @@ async def make_experiment(
             service = ExperimentService(
                 session, FakeLLM().as_service(), enqueue
             )
-            await service.start(experiment_id)
+            await service.start(ROOT, experiment_id)
     return experiment_id

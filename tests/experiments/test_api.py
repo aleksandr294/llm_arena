@@ -2,17 +2,22 @@
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.experiments import get_enqueue, get_llm_service
+from components.core.access import Principal
 from components.core.database import get_session
+from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.runner import ExperimentRunner
 from components.third_party.llm.schemas import LLMErrorKind, ProviderName
+from tests.access import Actors
 from tests.experiments.helpers import (
     Enqueued,
     Factory,
@@ -24,6 +29,17 @@ from tests.experiments.helpers import (
 pytestmark = pytest.mark.integration
 
 URL = "/api/v1/experiments"
+
+
+@pytest.fixture
+async def client(actors: Actors) -> AsyncClient:
+    """Authenticated as staff user A; shadows the anonymous root client."""
+    return await actors.client("staff_a")
+
+
+@pytest.fixture
+def owner(actors: Actors) -> Principal:
+    return actors.principal("staff_a")
 
 
 @pytest.fixture
@@ -69,8 +85,10 @@ def payload(dataset_id: uuid.UUID, **overrides: Any) -> dict[str, Any]:
     return body
 
 
-async def _create(client: AsyncClient, factory: Factory, cases: int = 3) -> str:
-    dataset_id = await make_dataset(factory, cases)
+async def _create(
+    client: AsyncClient, factory: Factory, cases: int, owner: Principal
+) -> str:
+    dataset_id = await make_dataset(factory, cases, owner)
     response = await client.post(URL, json=payload(dataset_id))
     assert response.status_code == 201
     return str(response.json()["id"])
@@ -84,9 +102,12 @@ async def _run_all(factory: Factory, llm: FakeLLM, enqueued: Enqueued) -> None:
 
 
 async def test_create_returns_201_and_persists_pending(
-    client: AsyncClient, session_factory: Factory, enqueued: Enqueued
+    client: AsyncClient,
+    session_factory: Factory,
+    enqueued: Enqueued,
+    owner: Principal,
 ) -> None:
-    dataset_id = await make_dataset(session_factory, 2)
+    dataset_id = await make_dataset(session_factory, 2, owner)
     response = await client.post(URL, json=payload(dataset_id))
     assert response.status_code == 201
     body = response.json()
@@ -104,9 +125,9 @@ async def test_create_returns_201_and_persists_pending(
 
 
 async def test_list_experiments_paginated(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    ids = [await _create(client, session_factory, 1) for _ in range(3)]
+    ids = [await _create(client, session_factory, 1, owner) for _ in range(3)]
     body = (await client.get(f"{URL}?limit=2&offset=2")).json()
     assert body["total"] == 3
     assert (body["limit"], body["offset"]) == (2, 2)
@@ -114,9 +135,12 @@ async def test_list_experiments_paginated(
 
 
 async def test_start_returns_202_and_enqueues(
-    client: AsyncClient, session_factory: Factory, enqueued: Enqueued
+    client: AsyncClient,
+    session_factory: Factory,
+    enqueued: Enqueued,
+    owner: Principal,
 ) -> None:
-    experiment_id = await _create(client, session_factory)
+    experiment_id = await _create(client, session_factory, 3, owner)
     response = await client.post(f"{URL}/{experiment_id}/start")
     assert response.status_code == 202
     body = response.json()
@@ -133,8 +157,9 @@ async def test_status_counts_and_results_filter(
     session_factory: Factory,
     llm: FakeLLM,
     enqueued: Enqueued,
+    owner: Principal,
 ) -> None:
-    experiment_id = await _create(client, session_factory)
+    experiment_id = await _create(client, session_factory, 3, owner)
     llm.script = [
         provider_error(LLMErrorKind.AUTHENTICATION),
     ]
@@ -165,8 +190,9 @@ async def test_retry_failed_returns_202_only_failed(
     session_factory: Factory,
     llm: FakeLLM,
     enqueued: Enqueued,
+    owner: Principal,
 ) -> None:
-    experiment_id = await _create(client, session_factory)
+    experiment_id = await _create(client, session_factory, 3, owner)
     llm.script = [provider_error(LLMErrorKind.AUTHENTICATION)]
     await client.post(f"{URL}/{experiment_id}/start")
     await _run_all(session_factory, llm, enqueued)
@@ -184,9 +210,9 @@ async def test_retry_failed_returns_202_only_failed(
 
 
 async def test_cancel_pending_experiment(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    experiment_id = await _create(client, session_factory)
+    experiment_id = await _create(client, session_factory, 3, owner)
     response = await client.post(f"{URL}/{experiment_id}/cancel")
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
@@ -218,9 +244,10 @@ async def test_invalid_transitions_are_409(
     session_factory: Factory,
     llm: FakeLLM,
     enqueued: Enqueued,
+    owner: Principal,
 ) -> None:
     # Retry a pending experiment.
-    experiment_id = await _create(client, session_factory)
+    experiment_id = await _create(client, session_factory, 3, owner)
     assert (
         await client.post(f"{URL}/{experiment_id}/retry-failed")
     ).status_code == 409
@@ -234,7 +261,7 @@ async def test_invalid_transitions_are_409(
         assert "completed" in response.json()["detail"]
 
     # Start and retry a cancelled experiment.
-    cancelled = await _create(client, session_factory)
+    cancelled = await _create(client, session_factory, 3, owner)
     await client.post(f"{URL}/{cancelled}/cancel")
     for action in ("start", "cancel", "retry-failed"):
         response = await client.post(f"{URL}/{cancelled}/{action}")
@@ -242,9 +269,12 @@ async def test_invalid_transitions_are_409(
 
 
 async def test_start_twice_while_running_is_allowed(
-    client: AsyncClient, session_factory: Factory, enqueued: Enqueued
+    client: AsyncClient,
+    session_factory: Factory,
+    enqueued: Enqueued,
+    owner: Principal,
 ) -> None:
-    experiment_id = await _create(client, session_factory, 2)
+    experiment_id = await _create(client, session_factory, 2, owner)
     await client.post(f"{URL}/{experiment_id}/start")
     again = await client.post(f"{URL}/{experiment_id}/start")
     assert again.status_code == 202
@@ -258,9 +288,12 @@ async def _loc(client: AsyncClient, body: dict[str, Any]) -> list[Any]:
 
 
 async def test_create_422_cases(
-    client: AsyncClient, session_factory: Factory, llm: FakeLLM
+    client: AsyncClient,
+    session_factory: Factory,
+    llm: FakeLLM,
+    owner: Principal,
 ) -> None:
-    dataset_id = await make_dataset(session_factory, 2)
+    dataset_id = await make_dataset(session_factory, 2, owner)
     target = {"provider": "openai", "model": "m1"}
 
     assert await _loc(client, payload(dataset_id, config={"targets": []})) == [
@@ -305,7 +338,7 @@ async def test_create_422_cases(
     assert "OPENAI_API_KEY" in detail["msg"]
 
     llm.unconfigured = set()
-    empty = await make_dataset(session_factory, 0)
+    empty = await make_dataset(session_factory, 0, owner)
     assert await _loc(client, payload(empty)) == ["body", "dataset_id"]
 
     # Nothing was created by any rejected request.
@@ -321,18 +354,18 @@ async def test_create_422_cases(
     ],
 )
 async def test_bad_pagination_422(
-    client: AsyncClient, session_factory: Factory, path: str
+    client: AsyncClient, session_factory: Factory, path: str, owner: Principal
 ) -> None:
-    experiment_id = await _create(client, session_factory, 1)
+    experiment_id = await _create(client, session_factory, 1, owner)
     assert (await client.get(f"{URL}{path}")).status_code == 422
     response = await client.get(f"{URL}/{experiment_id}/results{path}")
     assert response.status_code == 422
 
 
 async def test_invalid_status_filter_and_id_422(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    experiment_id = await _create(client, session_factory, 1)
+    experiment_id = await _create(client, session_factory, 1, owner)
     response = await client.get(f"{URL}/{experiment_id}/results?status=bogus")
     assert response.status_code == 422
     assert response.json()["detail"][0]["loc"] == ["query", "status"]
@@ -340,9 +373,9 @@ async def test_invalid_status_filter_and_id_422(
 
 
 async def test_valid_evaluator_config_is_stored_and_returned(
-    client: AsyncClient, session_factory: Factory
+    client: AsyncClient, session_factory: Factory, owner: Principal
 ) -> None:
-    dataset_id = await make_dataset(session_factory, 1)
+    dataset_id = await make_dataset(session_factory, 1, owner)
     config = {
         "evaluators": [
             {"id": "em", "type": "exact_match"},
@@ -376,11 +409,296 @@ async def test_valid_evaluator_config_is_stored_and_returned(
     ],
 )
 async def test_invalid_evaluator_config_is_422(
-    client: AsyncClient, session_factory: Factory, evaluator_config: Any
+    client: AsyncClient,
+    session_factory: Factory,
+    evaluator_config: Any,
+    owner: Principal,
 ) -> None:
-    dataset_id = await make_dataset(session_factory, 1)
+    dataset_id = await make_dataset(session_factory, 1, owner)
     loc = await _loc(
         client, payload(dataset_id, evaluator_config=evaluator_config)
     )
     assert loc[:2] == ["body", "evaluator_config"]
     assert (await client.get(URL)).json()["total"] == 0
+
+
+async def _as(actors: Actors, name: str) -> AsyncClient:
+    return await actors.client(name)
+
+
+async def _create_as(
+    actors: Actors, factory: Factory, name: str, cases: int = 2
+) -> str:
+    return await _create(
+        await _as(actors, name), factory, cases, actors.principal(name)
+    )
+
+
+async def test_create_records_owner_and_organization(
+    actors: Actors, session_factory: Factory
+) -> None:
+    owner = actors.principal("staff_a")
+    dataset_id = await make_dataset(session_factory, 1, owner)
+    client = await _as(actors, "staff_a")
+    response = await client.post(URL, json=payload(dataset_id))
+    assert response.status_code == 201
+    body = response.json()
+    assert body["owner_id"] == str(owner.user_id)
+    assert body["organization_id"] == str(owner.organization_id)
+    got = (await client.get(f"{URL}/{body['id']}")).json()
+    assert got["owner_id"] == str(owner.user_id)
+
+
+async def test_owner_in_request_body_is_ignored(
+    actors: Actors, session_factory: Factory
+) -> None:
+    owner = actors.principal("staff_a")
+    dataset_id = await make_dataset(session_factory, 1, owner)
+    client = await _as(actors, "staff_a")
+    forged = str(actors.principal("staff_b").user_id)
+    response = await client.post(URL, json=payload(dataset_id, owner_id=forged))
+    assert response.status_code == 201
+    assert response.json()["owner_id"] == str(owner.user_id)
+
+
+async def test_superadmin_cannot_create_experiments(
+    actors: Actors, session_factory: Factory, client: AsyncClient
+) -> None:
+    dataset_id = await make_dataset(
+        session_factory, 1, actors.principal("staff_a")
+    )
+    root = await _as(actors, "superadmin")
+    response = await root.post(URL, json=payload(dataset_id))
+    assert response.status_code == 403
+    assert (await root.get(URL)).json()["total"] == 0
+
+
+async def test_another_users_dataset_is_404_and_nothing_is_stored(
+    actors: Actors, session_factory: Factory, enqueued: Enqueued
+) -> None:
+    dataset_id = await make_dataset(
+        session_factory, 2, actors.principal("staff_a")
+    )
+    for name in ("staff_b", "admin_other"):
+        client = await _as(actors, name)
+        response = await client.post(URL, json=payload(dataset_id))
+        assert response.status_code == 404
+        unknown = await client.post(URL, json=payload(uuid.uuid4()))
+        assert (
+            response.json() == unknown.json() == {"detail": "Dataset not found"}
+        )
+    root = await _as(actors, "superadmin")
+    assert (await root.get(URL)).json()["total"] == 0
+    async with session_factory() as session:
+        count = await session.scalar(select(func.count(ExperimentResult.id)))
+    assert count == 0
+    assert enqueued.flat == []
+
+
+async def test_admin_of_the_organization_may_use_a_staff_dataset(
+    actors: Actors, session_factory: Factory
+) -> None:
+    dataset_id = await make_dataset(
+        session_factory, 1, actors.principal("staff_a")
+    )
+    admin = await _as(actors, "admin")
+    response = await admin.post(URL, json=payload(dataset_id))
+    assert response.status_code == 201
+    body = response.json()
+    # Owner is the caller, organization is the dataset's.
+    assert body["owner_id"] == str(actors["admin"].user_id)
+    assert body["organization_id"] == str(actors.org_id)
+
+
+@pytest.mark.parametrize(
+    ("name", "allowed"),
+    [
+        ("staff_a", True),
+        ("staff_b", False),
+        ("admin", True),
+        ("admin_other", False),
+        ("superadmin", True),
+    ],
+)
+async def test_experiment_actions_are_scoped(
+    actors: Actors,
+    session_factory: Factory,
+    name: str,
+    allowed: bool,
+) -> None:
+    experiment_id = await _create_as(actors, session_factory, "staff_a")
+    client = await _as(actors, name)
+    missing = uuid.uuid4()
+    for method, suffix in (
+        ("get", ""),
+        ("get", "/results"),
+        ("post", "/start"),
+        ("post", "/cancel"),
+        ("post", "/retry-failed"),
+    ):
+        response = await getattr(client, method)(
+            f"{URL}/{experiment_id}{suffix}"
+        )
+        if allowed:
+            # 409 for retry-failed on a not yet failed experiment is fine:
+            # the experiment is visible.
+            assert response.status_code != 404, (method, suffix)
+        else:
+            unknown = await getattr(client, method)(f"{URL}/{missing}{suffix}")
+            assert response.status_code == 404, (method, suffix)
+            assert response.json() == unknown.json()
+
+
+async def test_out_of_scope_actions_change_nothing(
+    actors: Actors, session_factory: Factory, enqueued: Enqueued
+) -> None:
+    experiment_id = await _create_as(actors, session_factory, "staff_a")
+    other = await _as(actors, "staff_b")
+    for action in ("start", "cancel", "retry-failed"):
+        assert (
+            await other.post(f"{URL}/{experiment_id}/{action}")
+        ).status_code == 404
+    assert enqueued.flat == []
+    owner = await _as(actors, "staff_a")
+    got = (await owner.get(f"{URL}/{experiment_id}")).json()
+    assert got["status"] == "pending"
+    assert got["status_counts"] == {"pending": 2}
+
+
+async def test_list_is_scoped_and_totals_reflect_scope(
+    actors: Actors, session_factory: Factory
+) -> None:
+    a1 = await _create_as(actors, session_factory, "staff_a", 1)
+    a2 = await _create_as(actors, session_factory, "staff_a", 1)
+    b1 = await _create_as(actors, session_factory, "staff_b", 1)
+
+    async def ids(name: str, query: str = "") -> tuple[list[str], int]:
+        body = (await (await _as(actors, name)).get(f"{URL}{query}")).json()
+        return [e["id"] for e in body["items"]], body["total"]
+
+    assert await ids("staff_a") == ([a1, a2], 2)
+    assert await ids("staff_b") == ([b1], 1)
+    assert await ids("admin") == ([a1, a2, b1], 3)
+    assert await ids("admin_other") == ([], 0)
+    assert await ids("superadmin") == ([a1, a2, b1], 3)
+    # Pagination totals are the visible total, not the table size.
+    paged = (await (await _as(actors, "staff_a")).get(f"{URL}?limit=1")).json()
+    assert paged["total"] == 2 and len(paged["items"]) == 1
+
+
+async def test_owner_filter_narrows_but_never_widens(
+    actors: Actors, session_factory: Factory
+) -> None:
+    a1 = await _create_as(actors, session_factory, "staff_a", 1)
+    b1 = await _create_as(actors, session_factory, "staff_b", 1)
+    staff_a = str(actors["staff_a"].user_id)
+    staff_b = str(actors["staff_b"].user_id)
+
+    async def listed(name: str, owner_id: str) -> list[str]:
+        client = await _as(actors, name)
+        body = (await client.get(f"{URL}?owner_id={owner_id}")).json()
+        return [e["id"] for e in body["items"]]
+
+    assert await listed("admin", staff_a) == [a1]
+    assert await listed("admin", staff_b) == [b1]
+    assert await listed("superadmin", staff_b) == [b1]
+    assert await listed("staff_a", staff_a) == [a1]
+    assert await listed("staff_a", staff_b) == []
+    assert await listed("admin_other", staff_a) == []
+
+
+async def _set_created(
+    factory: Factory, experiment_id: str, when: datetime
+) -> None:
+    async with factory() as session:
+        await session.execute(
+            update(Experiment)
+            .where(Experiment.id == uuid.UUID(experiment_id))
+            .values(created_at=when)
+        )
+        await session.commit()
+
+
+async def _set_status(factory: Factory, experiment_id: str, value: str) -> None:
+    async with factory() as session:
+        await session.execute(
+            update(Experiment)
+            .where(Experiment.id == uuid.UUID(experiment_id))
+            .values(status=value)
+        )
+        await session.commit()
+
+
+async def test_list_status_and_date_filters(
+    client: AsyncClient,
+    session_factory: Factory,
+    owner: Principal,
+) -> None:
+    first = await _create(client, session_factory, 1, owner)
+    second = await _create(client, session_factory, 1, owner)
+    third = await _create(client, session_factory, 1, owner)
+    await _set_status(session_factory, second, "completed")
+    await _set_status(session_factory, third, "completed")
+    day = datetime(2026, 3, 10, tzinfo=UTC)
+    await _set_created(session_factory, first, day)
+    await _set_created(session_factory, second, day + timedelta(days=1))
+    await _set_created(session_factory, third, day + timedelta(days=2))
+
+    async def listed(query: str) -> tuple[list[str], int]:
+        body = (await client.get(f"{URL}?{query}")).json()
+        return [e["id"] for e in body["items"]], body["total"]
+
+    assert await listed("status=completed") == ([second, third], 2)
+    assert await listed("status=pending") == ([first], 1)
+    assert await listed("status=cancelled") == ([], 0)
+    # Bounds are inclusive.
+    assert await listed(
+        "created_from=2026-03-10T00:00:00%2B00:00"
+        "&created_to=2026-03-11T00:00:00%2B00:00"
+    ) == ([first, second], 2)
+    # Combined filters.
+    assert await listed(
+        "status=completed&created_from=2026-03-11T00:00:00%2B00:00"
+        "&created_to=2026-03-11T00:00:00%2B00:00"
+    ) == ([second], 1)
+    assert await listed(
+        "status=pending&created_from=2026-03-11T00:00:00%2B00:00"
+    ) == ([], 0)
+
+
+@pytest.mark.parametrize(
+    ("query", "loc"),
+    [
+        ("status=bogus", "status"),
+        ("created_from=2026-03-10T00:00:00", "created_from"),
+        ("created_to=2026-03-10T00:00:00", "created_to"),
+        (
+            "created_from=2026-03-11T00:00:00%2B00:00"
+            "&created_to=2026-03-10T00:00:00%2B00:00",
+            "created_from",
+        ),
+        ("owner_id=not-a-uuid", "owner_id"),
+    ],
+)
+async def test_list_filter_validation_is_422(
+    client: AsyncClient, query: str, loc: str
+) -> None:
+    response = await client.get(f"{URL}?{query}")
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["query", loc]
+
+
+async def test_unauthenticated_requests_are_401(
+    app: FastAPI, actors: Actors
+) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as anonymous:
+        for method, path in (
+            ("get", URL),
+            ("post", URL),
+            ("get", f"{URL}/{uuid.uuid4()}"),
+            ("post", f"{URL}/{uuid.uuid4()}/start"),
+        ):
+            response = await getattr(anonymous, method)(path)
+            assert response.status_code == 401, (method, path)

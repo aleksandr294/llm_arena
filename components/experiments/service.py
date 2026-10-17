@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from components.core.access import Principal, require_organization
 from components.datasets.repository import (
     DatasetRepository,
     TestCaseRepository,
@@ -103,12 +104,18 @@ class ExperimentService:
                     "config.targets", str(exc)
                 ) from exc
 
-    async def create(self, data: ExperimentCreateSchema) -> Experiment:
+    async def create(
+        self, principal: Principal, data: ExperimentCreateSchema
+    ) -> Experiment:
         """Create the experiment with every result frozen as pending, with
         its prompt already rendered. No model request is made."""
         # Locking the dataset serializes against concurrent case inserts so
         # the frozen case set is well defined.
-        if await self.datasets.get_for_update(data.dataset_id) is None:
+        # A dataset outside the caller's scope is reported as unknown, and
+        # the caller's organization must exist before anything is stored.
+        require_organization(principal)
+        dataset = await self.datasets.get_for_update(data.dataset_id, principal)
+        if dataset is None:
             raise DatasetNotFoundError(data.dataset_id)
         self._check_providers(data)
         targets = data.config.targets
@@ -126,6 +133,10 @@ class ExperimentService:
         experiment = Experiment(
             name=data.name,
             dataset_id=data.dataset_id,
+            # Owner comes from the caller, never from the request body; the
+            # organization is the dataset's, which the caller can see.
+            organization_id=dataset.organization_id,
+            owner_id=principal.user_id,
             prompt_template=data.prompt_template,
             config=data.config.model_dump(mode="json"),
             # Normalized dump: defaults are frozen with the experiment.
@@ -151,13 +162,19 @@ class ExperimentService:
         await self.session.refresh(experiment)
         return experiment
 
-    async def _locked(self, experiment_id: uuid.UUID) -> Experiment:
-        experiment = await self.experiments.get_for_update(experiment_id)
+    async def _locked(
+        self, principal: Principal, experiment_id: uuid.UUID
+    ) -> Experiment:
+        experiment = await self.experiments.get_for_update(
+            experiment_id, principal
+        )
         if experiment is None:
             raise ExperimentNotFoundError(experiment_id)
         return experiment
 
-    async def start(self, experiment_id: uuid.UUID) -> int:
+    async def start(
+        self, principal: Principal, experiment_id: uuid.UUID
+    ) -> int:
         """Move pending to running and enqueue the pending results.
 
         Starting a running experiment enqueues its still pending results
@@ -165,7 +182,7 @@ class ExperimentService:
         (recovery from lost messages and crashes). Returns the number
         enqueued.
         """
-        experiment = await self._locked(experiment_id)
+        experiment = await self._locked(principal, experiment_id)
         if experiment.status in _FINAL_FOR_START:
             raise InvalidTransitionError(
                 experiment_id, experiment.status, "start"
@@ -182,11 +199,13 @@ class ExperimentService:
             await finalize_experiment(experiment, self.results)
         return await self._commit_and_enqueue([*pending, *stale])
 
-    async def cancel(self, experiment_id: uuid.UUID) -> Experiment:
+    async def cancel(
+        self, principal: Principal, experiment_id: uuid.UUID
+    ) -> Experiment:
         """Cancel pending results; running ones finish and are stored, then
         the finalizer sets ``cancelled``. Repeating it while results are
         still running is harmless."""
-        experiment = await self._locked(experiment_id)
+        experiment = await self._locked(principal, experiment_id)
         if experiment.status not in (
             ExperimentStatus.PENDING.value,
             ExperimentStatus.RUNNING.value,
@@ -200,9 +219,11 @@ class ExperimentService:
         await self.session.flush()
         return experiment
 
-    async def retry_failed(self, experiment_id: uuid.UUID) -> int:
+    async def retry_failed(
+        self, principal: Principal, experiment_id: uuid.UUID
+    ) -> int:
         """Re-run failed results only. Returns the number enqueued."""
-        experiment = await self._locked(experiment_id)
+        experiment = await self._locked(principal, experiment_id)
         if experiment.status not in _RETRYABLE_STATUSES:
             raise InvalidTransitionError(
                 experiment_id, experiment.status, "retry"
@@ -222,26 +243,42 @@ class ExperimentService:
         return len(ids)
 
     async def get(
-        self, experiment_id: uuid.UUID
+        self, principal: Principal, experiment_id: uuid.UUID
     ) -> tuple[Experiment, dict[str, int]]:
-        experiment = await self.experiments.get(experiment_id)
+        experiment = await self.experiments.get_scoped(experiment_id, principal)
         if experiment is None:
             raise ExperimentNotFoundError(experiment_id)
         return experiment, await self.results.status_counts(experiment_id)
 
     async def list_experiments(
-        self, limit: int, offset: int
+        self,
+        principal: Principal,
+        limit: int,
+        offset: int,
+        status: str | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        owner_id: uuid.UUID | None = None,
     ) -> tuple[Sequence[Experiment], int]:
-        return await self.experiments.list_page(limit, offset)
+        return await self.experiments.list_page(
+            principal,
+            limit,
+            offset,
+            status,
+            created_from,
+            created_to,
+            owner_id,
+        )
 
     async def list_results(
         self,
+        principal: Principal,
         experiment_id: uuid.UUID,
         limit: int,
         offset: int,
         status: str | None = None,
     ) -> tuple[Sequence[ExperimentResult], int]:
-        if await self.experiments.get(experiment_id) is None:
+        if await self.experiments.get_scoped(experiment_id, principal) is None:
             raise ExperimentNotFoundError(experiment_id)
         return await self.results.list_page(
             experiment_id, limit, offset, status

@@ -31,28 +31,34 @@ The whole stack: `docker compose up --build`.
 
 ## Datasets API
 
+Every dataset, experiment, evaluation, metrics and export endpoint requires
+an access token (see Authentication and users), and each caller sees only
+the data allowed by their role (see Access control and ownership). The
+examples below assume `TOKEN` holds an access token from `/auth/login` of a
+`staff` or `admin` user.
+
 A dataset is a named, ordered set of test cases. Test cases are append-only:
 each gets the next position (1, 2, ...) in its dataset. Content is stored and
 returned exactly as supplied.
 
 ```bash
 # create a dataset (201); name is trimmed, description is optional
-curl -X POST localhost:8000/api/v1/datasets \
+curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/datasets \
     -H 'Content-Type: application/json' \
     -d '{"name": "Capitals", "description": "Geography smoke test"}'
 
 # list (limit 1-100, default 50; offset >= 0) and get (includes case_count)
-curl 'localhost:8000/api/v1/datasets?limit=10&offset=0'
-curl localhost:8000/api/v1/datasets/<dataset_id>
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/datasets?limit=10&offset=0'
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/datasets/<dataset_id>
 
 # add a test case (201); expected_output and metadata (object) are optional
-curl -X POST localhost:8000/api/v1/datasets/<dataset_id>/cases \
+curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/datasets/<dataset_id>/cases \
     -H 'Content-Type: application/json' \
     -d '{"input": "Capital of France?", "expected_output": "Paris",
          "metadata": {"topic": "geo"}}'
 
 # list test cases ordered by position
-curl 'localhost:8000/api/v1/datasets/<dataset_id>/cases?limit=10'
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/datasets/<dataset_id>/cases?limit=10'
 ```
 
 List responses have the form `{items, total, limit, offset}`. Invalid input
@@ -70,7 +76,7 @@ under the metrics API below; deterministic evaluation is described below.
 ```bash
 # create (201). {input} is required in prompt_template; {expected_output}
 # is optional. Each target's provider needs its API key configured (else 422).
-curl -X POST localhost:8000/api/v1/experiments \
+curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments \
     -H 'Content-Type: application/json' \
     -d '{"name": "capitals-v1", "dataset_id": "<dataset_id>",
          "prompt_template": "Answer briefly: {input}",
@@ -82,16 +88,16 @@ curl -X POST localhost:8000/api/v1/experiments \
 
 # list, detail (config + status_counts) and results (limit 1-100, offset,
 # optional status filter: pending|running|succeeded|failed|cancelled)
-curl 'localhost:8000/api/v1/experiments?limit=10'
-curl localhost:8000/api/v1/experiments/<experiment_id>
-curl 'localhost:8000/api/v1/experiments/<experiment_id>/results?status=failed&limit=20'
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/experiments?limit=10'
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/experiments/<experiment_id>
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/experiments/<experiment_id>/results?status=failed&limit=20'
 
 # start (202): enqueue the pending results for the worker
-curl -X POST localhost:8000/api/v1/experiments/<experiment_id>/start
+curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments/<experiment_id>/start
 
 # cancel (200) and retry only the failed results (202)
-curl -X POST localhost:8000/api/v1/experiments/<experiment_id>/cancel
-curl -X POST localhost:8000/api/v1/experiments/<experiment_id>/retry-failed
+curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments/<experiment_id>/cancel
+curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments/<experiment_id>/retry-failed
 ```
 
 `start` and `retry-failed` return `{"experiment": {...}, "enqueued": N}`.
@@ -208,14 +214,14 @@ gets an `error` outcome (`missing_response`) per evaluator.
 ```bash
 # backfill (202): enqueue evaluation of succeeded results that lack an
 # outcome for some configured evaluator
-curl -X POST localhost:8000/api/v1/experiments/<experiment_id>/evaluate
+curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments/<experiment_id>/evaluate
 
 # outcomes (limit 1-100, default 50; offset >= 0; optional evaluator_id and
 # status filters: passed|failed|skipped|error)
-curl 'localhost:8000/api/v1/experiments/<experiment_id>/evaluations?evaluator_id=exact&status=failed&limit=20'
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/experiments/<experiment_id>/evaluations?evaluator_id=exact&status=failed&limit=20'
 
 # per-evaluator outcome counts
-curl localhost:8000/api/v1/experiments/<experiment_id>/evaluations/summary
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/experiments/<experiment_id>/evaluations/summary
 ```
 
 `evaluate` returns `{"experiment_id": "...", "enqueued": N, "remaining": M}`:
@@ -257,20 +263,20 @@ cost.
 B=localhost:8000/api/v1/experiments/<experiment_id>
 
 # results by status, experiment status and the finished flag
-curl $B/summary
+curl -H "Authorization: Bearer $TOKEN" $B/summary
 
 # per-target comparison: counts, error rate and kinds, latency, tokens,
 # evaluator pass rates and estimated cost
-curl $B/comparison
+curl -H "Authorization: Bearer $TOKEN" $B/comparison
 
 # per-case view (limit 1-100, default 50; offset >= 0; response text only
 # with include_responses=true, default false)
-curl "$B/cases?limit=20&offset=0&include_responses=true"
+curl -H "Authorization: Bearer $TOKEN" "$B/cases?limit=20&offset=0&include_responses=true"
 
 # export: format=json (default) or csv; include_responses defaults to true
 # for json and false for csv
-curl -OJ "$B/export?format=json"
-curl -OJ "$B/export?format=csv&include_responses=true"
+curl -H "Authorization: Bearer $TOKEN" -OJ "$B/export?format=json"
+curl -H "Authorization: Bearer $TOKEN" -OJ "$B/export?format=csv&include_responses=true"
 ```
 
 An unknown experiment returns `404` (also for `export`, before anything is
@@ -492,9 +498,6 @@ deactivate yourself. Responses never contain password hashes.
 
 ### Current scope and limitations
 
-- The dataset, experiment, evaluation and metrics endpoints are still open:
-  they do not require a token. Protecting them and scoping data by
-  organization is the next change (`resource-access-control`).
 - Login has no rate limiting or lockout, per account or per IP, so put the
   API behind a proxy that limits `/auth/login` and `/auth/refresh` if it is
   exposed. Only the number of concurrent password hashes is bounded (4 per
@@ -505,6 +508,73 @@ deactivate yourself. Responses never contain password hashes.
 - Access tokens are stateless for their short lifetime but are re-checked
   against the database, so there is no separate access-token revocation
   list.
+
+## Access control and ownership
+
+**Breaking change:** all dataset, experiment, evaluation, metrics and export
+endpoints now require `Authorization: Bearer <access_token>`. Without a valid
+token they answer 401 (`WWW-Authenticate: Bearer`). Only the health endpoints
+and `/auth/login|refresh|logout|validate` are public. Existing clients and
+scripts must sign in first.
+
+Datasets and experiments record who created them (`owner_id`) and the
+organization of the creator (`organization_id`); both are in every dataset
+and experiment response and are set by the server from the token. They are
+never read from a request body: sending `owner_id` or `organization_id` when
+creating a dataset or experiment has no effect.
+
+| role | sees and changes |
+| --- | --- |
+| `staff` | only the datasets and experiments they own |
+| `admin` | everything in their own organization, whoever owns it |
+| `superadmin` | everything in every organization |
+
+- Existence is hidden: a dataset, experiment or any of its sub-resources
+  (cases, results, evaluations, metrics, export) outside the caller's scope
+  answers `404`, with the same body as an id that does not exist. A list
+  simply omits them. This also covers `start`, `cancel`, `retry-failed`,
+  `evaluate` and adding cases: nothing is changed or enqueued for an
+  out-of-scope experiment.
+- An experiment can only be created from a dataset the caller can see (else
+  `404 Dataset not found`).
+- A `superadmin` has no organization, so cannot create datasets or
+  experiments (`403`); they can read and manage what exists.
+- Legacy data: datasets and experiments that existed before this change were
+  assigned to an organization named `Default` (created if missing) with no
+  owner. Its admins and all superadmins can see them; staff cannot, because
+  nobody owns them.
+- Background workers act on stored ids and are not scoped; scoping applies to
+  the HTTP API.
+
+### List filters
+
+`GET /datasets` and `GET /experiments` accept, besides `limit` and `offset`:
+
+| parameter | meaning |
+| --- | --- |
+| `created_from`, `created_to` | inclusive bounds on the creation time; timezone-aware ISO 8601 (a naive value or `created_from` after `created_to` is `422`); encode the `+` of an offset as `%2B` |
+| `status` | experiments only: `pending`, `running`, `completed`, `partially_failed`, `failed` or `cancelled` |
+| `owner_id` | only items owned by that user; useful for `admin` and `superadmin` (for `staff` it can only narrow their own items, and another user's id gives an empty list) |
+
+Filters combine with each other and with the role's scope, and `total`
+reflects the filtered set.
+
+```bash
+B=localhost:8000/api/v1
+TOKEN=$(curl -s -X POST $B/auth/login -H 'Content-Type: application/json' \
+    -d '{"email": "staff@acme.test", "password": "<password>"}' \
+    | python -c 'import sys, json; print(json.load(sys.stdin)["access_token"])')
+
+# datasets created in 2026 (UTC), then with an explicit offset
+curl -H "Authorization: Bearer $TOKEN" \
+    "$B/datasets?created_from=2026-01-01T00:00:00Z&created_to=2026-12-31T23:59:59Z"
+curl -H "Authorization: Bearer $TOKEN" \
+    "$B/datasets?created_from=2026-01-01T00:00:00%2B02:00"
+
+# failed experiments of one user (as an admin or superadmin)
+curl -H "Authorization: Bearer $TOKEN" \
+    "$B/experiments?status=failed&owner_id=<user_id>&limit=20"
+```
 
 ## Migrations
 
@@ -518,6 +588,19 @@ Authentication adds revision `0005` (tables `organizations`, `users`,
 `refresh_tokens`): run `alembic upgrade head` before starting the API with
 this change, and create the first superadmin afterwards. Roll back with
 `alembic downgrade 0004` (this deletes users, organizations and sessions).
+
+Resource ownership adds revision `0006` (`organization_id` and `owner_id` on
+`datasets` and `experiments`). Run `alembic upgrade head` before starting the
+API with this change. Existing rows are assigned to the `Default`
+organization with a null owner (see Access control and ownership), so no
+result is lost. `alembic downgrade 0005` drops the ownership columns (the
+`Default` organization stays unless it has no users, see below). If an
+organization named `Default` already exists it is reused, including when it
+is inactive; legacy data is then adopted by an inactive organization and
+needs reactivation. The downgrade removes the `Default` organization only
+if it has no users, even if the operator created it before the upgrade.
+Deploy order: migrate, then restart the API
+and worker; clients must send a token from then on.
 
 Register each component's `models` module in `migrations/env.py` so
 autogenerate sees its tables. The baseline revision `0001` is empty.

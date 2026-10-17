@@ -87,6 +87,9 @@ class ExperimentSchema(BaseModel):
     id: uuid.UUID
     name: str
     dataset_id: uuid.UUID
+    organization_id: uuid.UUID
+    # None for experiments that predate ownership.
+    owner_id: uuid.UUID | None
     status: str
     prompt_template: str
     config: ExperimentConfigSchema

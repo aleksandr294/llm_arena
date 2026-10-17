@@ -23,6 +23,7 @@ from components.third_party.llm.schemas import (
     ProviderName,
 )
 from components.third_party.llm.service import ProviderNotConfiguredError
+from tests.access import ROOT
 from tests.experiments.helpers import (
     Enqueued,
     Factory,
@@ -306,7 +307,7 @@ async def test_retry_failed_reruns_only_failed(
     enqueued = Enqueued()
     async with session_factory() as s:
         service = ExperimentService(s, llm.as_service(), enqueued)
-        assert await service.retry_failed(experiment_id) == 1
+        assert await service.retry_failed(ROOT, experiment_id) == 1
     assert enqueued.flat == [ids[1]]
     calls_before = len(llm.calls)
     for result_id in ids:  # redelivering everything must be harmless
@@ -382,7 +383,7 @@ async def test_cancel_with_running_result_finishes_as_cancelled(
     await started.wait()
     async with session_factory() as s:
         service = ExperimentService(s, llm.as_service(), Enqueued())
-        experiment = await service.cancel(experiment_id)
+        experiment = await service.cancel(ROOT, experiment_id)
         await s.commit()
         assert experiment.status == ExperimentStatus.RUNNING
     release.set()

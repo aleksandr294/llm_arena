@@ -4,10 +4,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.v1.utils import CreatedRangeSchema, get_created_range, get_principal
+from components.core.access import OrganizationRequiredError, Principal
 from components.core.config import get_settings
 from components.core.database import get_session
 from components.datasets.service import DatasetNotFoundError
-from components.experiments.models import ResultStatus
+from components.experiments.models import ExperimentStatus, ResultStatus
 from components.experiments.schemas import (
     ExperimentCreateSchema,
     ExperimentDetailSchema,
@@ -51,6 +53,7 @@ def get_experiment_service(
 
 
 ServiceDep = Annotated[ExperimentService, Depends(get_experiment_service)]
+PrincipalDep = Annotated[Principal, Depends(get_principal)]
 
 
 def _not_found() -> HTTPException:
@@ -65,10 +68,12 @@ def _conflict(exc: InvalidTransitionError) -> HTTPException:
     "", status_code=status.HTTP_201_CREATED, response_model=ExperimentSchema
 )
 async def create_experiment(
-    body: ExperimentCreateSchema, service: ServiceDep
+    body: ExperimentCreateSchema, service: ServiceDep, principal: PrincipalDep
 ) -> ExperimentSchema:
     try:
-        experiment = await service.create(body)
+        experiment = await service.create(principal, body)
+    except OrganizationRequiredError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from None
     except DatasetNotFoundError:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, "Dataset not found"
@@ -90,9 +95,25 @@ async def create_experiment(
 
 @router.get("", response_model=ExperimentPageSchema)
 async def list_experiments(
-    service: ServiceDep, limit: Limit = 50, offset: Offset = 0
+    service: ServiceDep,
+    principal: PrincipalDep,
+    created: Annotated[CreatedRangeSchema, Depends(get_created_range)],
+    limit: Limit = 50,
+    offset: Offset = 0,
+    experiment_status: Annotated[
+        ExperimentStatus | None, Query(alias="status")
+    ] = None,
+    owner_id: uuid.UUID | None = None,
 ) -> ExperimentPageSchema:
-    items, total = await service.list_experiments(limit, offset)
+    items, total = await service.list_experiments(
+        principal,
+        limit,
+        offset,
+        experiment_status.value if experiment_status else None,
+        created.created_from,
+        created.created_to,
+        owner_id,
+    )
     return ExperimentPageSchema(
         items=[ExperimentSchema.model_validate(i) for i in items],
         total=total,
@@ -103,10 +124,10 @@ async def list_experiments(
 
 @router.get("/{experiment_id}", response_model=ExperimentDetailSchema)
 async def get_experiment(
-    experiment_id: uuid.UUID, service: ServiceDep
+    experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> ExperimentDetailSchema:
     try:
-        experiment, counts = await service.get(experiment_id)
+        experiment, counts = await service.get(principal, experiment_id)
     except ExperimentNotFoundError:
         raise _not_found() from None
     return ExperimentDetailSchema(
@@ -121,12 +142,14 @@ async def get_experiment(
 async def list_results(
     experiment_id: uuid.UUID,
     service: ServiceDep,
+    principal: PrincipalDep,
     limit: Limit = 50,
     offset: Offset = 0,
     result_status: Annotated[ResultStatus | None, Query(alias="status")] = None,
 ) -> ExperimentResultPageSchema:
     try:
         items, total = await service.list_results(
+            principal,
             experiment_id,
             limit,
             offset,
@@ -143,9 +166,12 @@ async def list_results(
 
 
 async def _enqueue_response(
-    service: ExperimentService, experiment_id: uuid.UUID, enqueued: int
+    service: ExperimentService,
+    principal: Principal,
+    experiment_id: uuid.UUID,
+    enqueued: int,
 ) -> ExperimentEnqueueSchema:
-    experiment, _ = await service.get(experiment_id)
+    experiment, _ = await service.get(principal, experiment_id)
     return ExperimentEnqueueSchema(
         experiment=ExperimentSchema.model_validate(experiment),
         enqueued=enqueued,
@@ -158,23 +184,23 @@ async def _enqueue_response(
     response_model=ExperimentEnqueueSchema,
 )
 async def start_experiment(
-    experiment_id: uuid.UUID, service: ServiceDep
+    experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> ExperimentEnqueueSchema:
     try:
-        enqueued = await service.start(experiment_id)
+        enqueued = await service.start(principal, experiment_id)
     except ExperimentNotFoundError:
         raise _not_found() from None
     except InvalidTransitionError as exc:
         raise _conflict(exc) from None
-    return await _enqueue_response(service, experiment_id, enqueued)
+    return await _enqueue_response(service, principal, experiment_id, enqueued)
 
 
 @router.post("/{experiment_id}/cancel", response_model=ExperimentSchema)
 async def cancel_experiment(
-    experiment_id: uuid.UUID, service: ServiceDep
+    experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> ExperimentSchema:
     try:
-        experiment = await service.cancel(experiment_id)
+        experiment = await service.cancel(principal, experiment_id)
     except ExperimentNotFoundError:
         raise _not_found() from None
     except InvalidTransitionError as exc:
@@ -188,12 +214,12 @@ async def cancel_experiment(
     response_model=ExperimentEnqueueSchema,
 )
 async def retry_failed(
-    experiment_id: uuid.UUID, service: ServiceDep
+    experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> ExperimentEnqueueSchema:
     try:
-        enqueued = await service.retry_failed(experiment_id)
+        enqueued = await service.retry_failed(principal, experiment_id)
     except ExperimentNotFoundError:
         raise _not_found() from None
     except InvalidTransitionError as exc:
         raise _conflict(exc) from None
-    return await _enqueue_response(service, experiment_id, enqueued)
+    return await _enqueue_response(service, principal, experiment_id, enqueued)

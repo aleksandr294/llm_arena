@@ -45,12 +45,28 @@ class ResultStatus(StrEnum):
 
 class Experiment(Base):
     __tablename__ = "experiments"
+    __table_args__ = (
+        Index(
+            "ix_experiments_organization_id_created_at",
+            "organization_id",
+            "created_at",
+        ),
+        Index("ix_experiments_owner_id_created_at", "owner_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255))
     # RESTRICT: a dataset referenced by an experiment cannot be deleted.
     dataset_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("datasets.id", ondelete="RESTRICT")
+    )
+    # RESTRICT: organizations and users are deactivated, never deleted.
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT")
+    )
+    # NULL for experiments that predate ownership (legacy rows).
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), default=None
     )
     # Lowercase ExperimentStatus value; varchar, not a PG enum type.
     status: Mapped[str] = mapped_column(
