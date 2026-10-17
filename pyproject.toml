@@ -18,6 +18,9 @@ taskiq-aio-pika = "*"
 uvicorn = "*"
 openai = "^3.32.0"
 anthropic = "^1.15.0"
+pyjwt = "^2.15.1"
+argon2-cffi = "^25.1.0"
+typer = "^0.27.3"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
