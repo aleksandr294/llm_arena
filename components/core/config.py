@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,17 @@ class SettingsSchema(BaseSettings):
 
     # Max simultaneous model requests per provider in one worker process.
     llm_max_concurrency: int = Field(default=4, ge=1)
+
+    # Optional operator-supplied pricing file used to estimate costs. Blank
+    # means unset; no prices are shipped.
+    pricing_file: str | None = None
+
+    @field_validator("pricing_file")
+    @classmethod
+    def _blank_pricing_file_is_unset(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        return value.strip()
 
 
 @lru_cache
