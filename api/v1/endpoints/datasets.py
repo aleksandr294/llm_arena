@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.v1.docs import errors
 from api.v1.utils import CreatedRangeSchema, get_created_range, get_principal
 from components.core.access import OrganizationRequiredError, Principal
 from components.core.database import get_session
@@ -39,7 +40,11 @@ def _not_found() -> HTTPException:
 
 
 @router.post(
-    "", status_code=status.HTTP_201_CREATED, response_model=DatasetSchema
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=DatasetSchema,
+    summary="Create a dataset",
+    responses=errors(401, 403),
 )
 async def create_dataset(
     body: DatasetCreateSchema, service: ServiceDep, principal: PrincipalDep
@@ -51,7 +56,12 @@ async def create_dataset(
     return DatasetSchema.model_validate(dataset)
 
 
-@router.get("", response_model=DatasetPageSchema)
+@router.get(
+    "",
+    response_model=DatasetPageSchema,
+    summary="List datasets",
+    responses=errors(401),
+)
 async def list_datasets(
     service: ServiceDep,
     principal: PrincipalDep,
@@ -76,7 +86,12 @@ async def list_datasets(
     )
 
 
-@router.get("/{dataset_id}", response_model=DatasetDetailSchema)
+@router.get(
+    "/{dataset_id}",
+    response_model=DatasetDetailSchema,
+    summary="Get a dataset",
+    responses=errors(401, 404),
+)
 async def get_dataset(
     dataset_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> DatasetDetailSchema:
@@ -94,6 +109,8 @@ async def get_dataset(
     "/{dataset_id}/cases",
     status_code=status.HTTP_201_CREATED,
     response_model=TestCaseSchema,
+    summary="Add a test case",
+    responses=errors(401, 404),
 )
 async def add_case(
     dataset_id: uuid.UUID,
@@ -108,7 +125,12 @@ async def add_case(
     return TestCaseSchema.model_validate(case)
 
 
-@router.get("/{dataset_id}/cases", response_model=TestCasePageSchema)
+@router.get(
+    "/{dataset_id}/cases",
+    response_model=TestCasePageSchema,
+    summary="List test cases",
+    responses=errors(401, 404),
+)
 async def list_cases(
     dataset_id: uuid.UUID,
     service: ServiceDep,

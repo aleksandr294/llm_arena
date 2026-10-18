@@ -18,7 +18,13 @@ class Base(DeclarativeBase):
 
 
 def create_engine(url: str) -> AsyncEngine:
-    return create_async_engine(url, pool_pre_ping=True)
+    return create_async_engine(
+        url,
+        pool_pre_ping=True,
+        # Statement errors would otherwise embed bound values (filter text,
+        # emails, ids) in exception messages that end up in logs.
+        hide_parameters=True,
+    )
 
 
 @lru_cache

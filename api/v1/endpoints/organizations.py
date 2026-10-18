@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.v1.docs import errors
 from api.v1.utils import get_principal
 from components.core.access import Principal, Role
 from components.core.database import get_session
@@ -59,7 +60,12 @@ def _conflict() -> HTTPException:
 
 
 @router.post(
-    "", status_code=status.HTTP_201_CREATED, response_model=OrganizationSchema
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=OrganizationSchema,
+    summary="Create an organization",
+    description="Superadmin only.",
+    responses=errors(401, 403, 409),
 )
 async def create_organization(
     body: OrganizationCreateSchema, service: ServiceDep
@@ -71,7 +77,13 @@ async def create_organization(
     return OrganizationSchema.model_validate(organization)
 
 
-@router.get("", response_model=OrganizationPageSchema)
+@router.get(
+    "",
+    response_model=OrganizationPageSchema,
+    summary="List organizations",
+    description="Superadmin only.",
+    responses=errors(401, 403),
+)
 async def list_organizations(
     service: ServiceDep, limit: Limit = 50, offset: Offset = 0
 ) -> OrganizationPageSchema:
@@ -84,7 +96,13 @@ async def list_organizations(
     )
 
 
-@router.get("/{organization_id}", response_model=OrganizationSchema)
+@router.get(
+    "/{organization_id}",
+    response_model=OrganizationSchema,
+    summary="Get an organization",
+    description="Superadmin only.",
+    responses=errors(401, 403, 404),
+)
 async def get_organization(
     organization_id: uuid.UUID, service: ServiceDep
 ) -> OrganizationSchema:
@@ -96,7 +114,15 @@ async def get_organization(
         raise _not_found() from None
 
 
-@router.patch("/{organization_id}", response_model=OrganizationSchema)
+@router.patch(
+    "/{organization_id}",
+    response_model=OrganizationSchema,
+    summary="Update an organization",
+    description=(
+        "Superadmin only. Blocking an organization revokes its sessions."
+    ),
+    responses=errors(401, 403, 404, 409),
+)
 async def update_organization(
     organization_id: uuid.UUID,
     body: OrganizationUpdateSchema,

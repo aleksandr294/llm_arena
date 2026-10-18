@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
 
+from api.v1.docs import errors
 from components.core.config import SettingsSchema, get_settings
 from components.core.health import (
     HealthCheck,
@@ -18,13 +19,13 @@ def get_health_checks() -> dict[str, HealthCheck]:
     return {"database": check_database, "rabbitmq": check_rabbitmq}
 
 
-@router.get("/live")
+@router.get("/live", summary="Liveness")
 async def live() -> dict[str, str]:
     """Liveness: process is up. Never touches external dependencies."""
     return {"status": "ok"}
 
 
-@router.get("/ready")
+@router.get("/ready", summary="Readiness", responses=errors(503))
 async def ready(
     response: Response,
     settings: Annotated[SettingsSchema, Depends(get_settings)],

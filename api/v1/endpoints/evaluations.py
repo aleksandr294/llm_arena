@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from api.v1.docs import errors
 from api.v1.utils import get_principal
 from components.core.access import Principal
 from components.core.database import get_session_factory
@@ -54,6 +55,8 @@ def _not_found() -> HTTPException:
     "/{experiment_id}/evaluate",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=EvaluationEnqueueSchema,
+    summary="Evaluate an experiment",
+    responses=errors(401, 404),
 )
 async def evaluate_experiment(
     experiment_id: uuid.UUID,
@@ -79,6 +82,8 @@ async def evaluate_experiment(
 @router.get(
     "/{experiment_id}/evaluations/summary",
     response_model=EvaluationSummarySchema,
+    summary="Summarize evaluations",
+    responses=errors(401, 404),
 )
 async def evaluation_summary(
     experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
@@ -89,7 +94,12 @@ async def evaluation_summary(
         raise _not_found() from None
 
 
-@router.get("/{experiment_id}/evaluations", response_model=EvaluationPageSchema)
+@router.get(
+    "/{experiment_id}/evaluations",
+    response_model=EvaluationPageSchema,
+    summary="List evaluation results",
+    responses=errors(401, 404),
+)
 async def list_evaluations(
     experiment_id: uuid.UUID,
     service: ServiceDep,
