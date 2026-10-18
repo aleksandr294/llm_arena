@@ -1,6 +1,5 @@
 """Integration tests: need PostgreSQL (``DATABASE_URL``)."""
 
-import os
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -13,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from components.core import database
 from components.core.database import Base, create_engine, get_session
 from components.core.repository import BaseRepository
+from tests.helpers import checked_database_url
 
 pytestmark = pytest.mark.integration
 
@@ -30,7 +30,7 @@ class ProbeRepository(BaseRepository[ProbeModel]):
 
 @pytest.fixture
 async def factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_engine(os.environ["DATABASE_URL"])
+    engine = create_engine(checked_database_url())
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield async_sessionmaker(engine, expire_on_commit=False)
@@ -97,7 +97,7 @@ async def test_autogenerate_detects_model_table(
     from alembic.autogenerate import compare_metadata
     from alembic.migration import MigrationContext
 
-    engine = create_engine(os.environ["DATABASE_URL"])
+    engine = create_engine(checked_database_url())
     async with engine.begin() as conn:
         await conn.run_sync(lambda sync_conn: Base.metadata.drop_all(sync_conn))
 

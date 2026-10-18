@@ -1,6 +1,5 @@
 """Integration tests: need PostgreSQL (``DATABASE_URL``)."""
 
-import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -20,6 +19,7 @@ from components.organizations.models import Organization
 from components.organizations.repository import OrganizationRepository
 from components.users.models import User
 from components.users.repository import UserRepository
+from tests.helpers import checked_database_url
 
 pytestmark = pytest.mark.integration
 
@@ -28,7 +28,7 @@ _MODELS = (Organization, User, RefreshToken)
 
 @pytest.fixture
 async def session() -> AsyncIterator[AsyncSession]:
-    engine = create_engine(os.environ["DATABASE_URL"])
+    engine = create_engine(checked_database_url())
     tables = [cast(Table, m.__table__) for m in _MODELS]
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all, tables=tables)

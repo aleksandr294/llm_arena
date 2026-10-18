@@ -6,7 +6,6 @@ text is searched for tokens, passwords, hashes and submitted emails.
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 import pytest
@@ -22,6 +21,7 @@ from components.core import database
 from components.core.enums import Role
 from components.users.models import User
 from tests.auth.helpers import PASSWORD, Factory, seed_user
+from tests.helpers import checked_database_url
 
 pytestmark = pytest.mark.integration
 
@@ -215,7 +215,7 @@ async def test_cli_does_not_log_secrets(
 ) -> None:
     # The command runs asyncio.run itself, so it gets its own thread and a
     # pool-less engine whose connections do not outlive that loop.
-    engine = create_async_engine(os.environ["DATABASE_URL"], poolclass=NullPool)
+    engine = create_async_engine(checked_database_url(), poolclass=NullPool)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(database, "get_session_factory", lambda: factory)
     monkeypatch.setenv(cli.PASSWORD_ENV, CLI_PASSWORD)
