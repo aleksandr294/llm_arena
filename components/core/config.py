@@ -1,12 +1,13 @@
 from functools import lru_cache
 from typing import Final
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Placeholder shipped in .env.example; must never be accepted as a real key.
 JWT_SECRET_PLACEHOLDER: Final = "change-me-generate-a-random-secret-key"
 JWT_SECRET_MIN_LENGTH: Final = 32
+ADMIN_SECRET_MIN_LENGTH: Final = 32
 
 
 class SettingsSchema(BaseSettings):
@@ -33,6 +34,18 @@ class SettingsSchema(BaseSettings):
     jwt_refresh_ttl_seconds: int = Field(default=604800, ge=1)
     jwt_issuer: str = Field(default="llm-arena", min_length=1)
 
+    # Admin panel (fastadmin). Blank means unset and the panel is not
+    # mounted. Signs the panel's own session cookie, separate from the JWTs.
+    admin_secret_key: SecretStr | None = None
+    # Set false only for local plain-HTTP development.
+    admin_session_cookie_secure: bool = True
+    # Lifetime of a panel session. Signing out only clears the browser
+    # cookie; the signed value itself stays valid until this expires.
+    admin_session_ttl_seconds: int = Field(default=28800, ge=60)
+
+    # Serves Swagger UI, ReDoc and the OpenAPI schema when true.
+    api_docs_enabled: bool = True
+
     openai_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
 
@@ -58,6 +71,38 @@ class SettingsSchema(BaseSettings):
                 "jwt_secret_key must not be the .env.example placeholder"
             )
         return value
+
+    @field_validator("admin_secret_key", mode="before")
+    @classmethod
+    def _blank_admin_secret_is_unset(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("admin_secret_key")
+    @classmethod
+    def _admin_secret_is_strong(
+        cls, value: SecretStr | None
+    ) -> SecretStr | None:
+        # Messages name the setting but never echo the value.
+        if value is not None and (
+            len(value.get_secret_value()) < ADMIN_SECRET_MIN_LENGTH
+        ):
+            raise ValueError(
+                f"admin_secret_key must be at least {ADMIN_SECRET_MIN_LENGTH} "
+                "characters"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _admin_secret_differs_from_jwt(self) -> "SettingsSchema":
+        if (
+            self.admin_secret_key is not None
+            and self.admin_secret_key.get_secret_value()
+            == self.jwt_secret_key.get_secret_value()
+        ):
+            raise ValueError("admin_secret_key must differ from jwt_secret_key")
+        return self
 
     @field_validator("pricing_file")
     @classmethod

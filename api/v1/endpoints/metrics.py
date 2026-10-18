@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from api.v1.docs import errors
 from api.v1.utils import get_principal
 from components.core.access import Principal
 from components.core.config import get_settings
@@ -56,7 +57,12 @@ def _not_found() -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, "Experiment not found")
 
 
-@router.get("/{experiment_id}/summary", response_model=SummarySchema)
+@router.get(
+    "/{experiment_id}/summary",
+    response_model=SummarySchema,
+    summary="Experiment metrics summary",
+    responses=errors(401, 404),
+)
 async def metrics_summary(
     experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> SummarySchema:
@@ -66,7 +72,12 @@ async def metrics_summary(
         raise _not_found() from None
 
 
-@router.get("/{experiment_id}/comparison", response_model=ComparisonSchema)
+@router.get(
+    "/{experiment_id}/comparison",
+    response_model=ComparisonSchema,
+    summary="Compare models in an experiment",
+    responses=errors(401, 404),
+)
 async def metrics_comparison(
     experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> ComparisonSchema:
@@ -76,7 +87,12 @@ async def metrics_comparison(
         raise _not_found() from None
 
 
-@router.get("/{experiment_id}/cases", response_model=CasePageSchema)
+@router.get(
+    "/{experiment_id}/cases",
+    response_model=CasePageSchema,
+    summary="Per-case comparison",
+    responses=errors(401, 404),
+)
 async def metrics_cases(
     experiment_id: uuid.UUID,
     service: ServiceDep,
@@ -93,7 +109,12 @@ async def metrics_cases(
         raise _not_found() from None
 
 
-@router.get("/{experiment_id}/export")
+@router.get(
+    "/{experiment_id}/export",
+    summary="Export an experiment",
+    description="Stream the experiment as JSON or CSV.",
+    responses=errors(401, 404),
+)
 async def export_experiment(
     experiment_id: uuid.UUID,
     principal: PrincipalDep,

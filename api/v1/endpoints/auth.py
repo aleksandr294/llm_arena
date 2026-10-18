@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
 
+from api.v1.docs import errors
 from api.v1.utils import get_auth_service, unauthorized
 from components.auth.schemas import (
     LoginRequestSchema,
@@ -17,7 +18,7 @@ from components.auth.service import (
     TokenPair,
 )
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["authentication"])
 
 ServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 
@@ -30,7 +31,13 @@ def _pair(pair: TokenPair) -> TokenPairSchema:
     )
 
 
-@router.post("/login", response_model=TokenPairSchema)
+@router.post(
+    "/login",
+    response_model=TokenPairSchema,
+    summary="Sign in",
+    description="Exchange email and password for an access and refresh token.",
+    responses=errors(401),
+)
 async def login(
     body: LoginRequestSchema, service: ServiceDep
 ) -> TokenPairSchema:
@@ -40,7 +47,13 @@ async def login(
         raise unauthorized("Invalid credentials") from None
 
 
-@router.post("/refresh", response_model=TokenPairSchema)
+@router.post(
+    "/refresh",
+    response_model=TokenPairSchema,
+    summary="Refresh tokens",
+    description="Rotate a refresh token; the old one stops working.",
+    responses=errors(401),
+)
 async def refresh(
     body: RefreshRequestSchema, service: ServiceDep
 ) -> TokenPairSchema:
@@ -50,7 +63,13 @@ async def refresh(
         raise unauthorized("Invalid refresh token") from None
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Sign out",
+    description="Revoke a refresh token.",
+    responses=errors(401),
+)
 async def logout(body: RefreshRequestSchema, service: ServiceDep) -> Response:
     try:
         await service.logout(body.refresh_token)
@@ -59,7 +78,14 @@ async def logout(body: RefreshRequestSchema, service: ServiceDep) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/validate", response_model=ValidationResultSchema)
+@router.post(
+    "/validate",
+    response_model=ValidationResultSchema,
+    summary="Validate an access token",
+    description=(
+        "Always answers 200; an unusable token is reported in the body."
+    ),
+)
 async def validate(
     body: ValidateRequestSchema, service: ServiceDep
 ) -> ValidationResultSchema:

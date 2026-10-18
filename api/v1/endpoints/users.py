@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.v1.docs import errors
 from api.v1.utils import get_principal, get_settings_dependency
 from components.core.access import Principal, Role
 from components.core.config import SettingsSchema
@@ -63,7 +64,13 @@ def _invalid(exc: UserInputError) -> RequestValidationError:
     )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, response_model=UserSchema)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=UserSchema,
+    summary="Create a user",
+    responses=errors(401, 403, 409),
+)
 async def create_user(
     body: UserCreateSchema, principal: PrincipalDep, service: ServiceDep
 ) -> UserSchema:
@@ -86,7 +93,12 @@ async def create_user(
     return UserSchema.model_validate(user)
 
 
-@router.get("", response_model=UserPageSchema)
+@router.get(
+    "",
+    response_model=UserPageSchema,
+    summary="List users",
+    responses=errors(401),
+)
 async def list_users(
     principal: PrincipalDep,
     service: ServiceDep,
@@ -107,7 +119,12 @@ async def list_users(
     )
 
 
-@router.get("/{user_id}", response_model=UserSchema)
+@router.get(
+    "/{user_id}",
+    response_model=UserSchema,
+    summary="Get a user",
+    responses=errors(401, 404),
+)
 async def get_user(
     user_id: uuid.UUID, principal: PrincipalDep, service: ServiceDep
 ) -> UserSchema:
@@ -119,7 +136,12 @@ async def get_user(
         raise _not_found() from None
 
 
-@router.patch("/{user_id}", response_model=UserSchema)
+@router.patch(
+    "/{user_id}",
+    response_model=UserSchema,
+    summary="Update a user",
+    responses=errors(401, 403, 404, 409),
+)
 async def update_user(
     user_id: uuid.UUID,
     body: UserUpdateSchema,

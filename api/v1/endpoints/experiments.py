@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.v1.docs import errors
 from api.v1.utils import CreatedRangeSchema, get_created_range, get_principal
 from components.core.access import OrganizationRequiredError, Principal
 from components.core.config import get_settings
@@ -65,7 +66,11 @@ def _conflict(exc: InvalidTransitionError) -> HTTPException:
 
 
 @router.post(
-    "", status_code=status.HTTP_201_CREATED, response_model=ExperimentSchema
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentSchema,
+    summary="Create an experiment",
+    responses=errors(401, 403, 404),
 )
 async def create_experiment(
     body: ExperimentCreateSchema, service: ServiceDep, principal: PrincipalDep
@@ -93,7 +98,12 @@ async def create_experiment(
     return ExperimentSchema.model_validate(experiment)
 
 
-@router.get("", response_model=ExperimentPageSchema)
+@router.get(
+    "",
+    response_model=ExperimentPageSchema,
+    summary="List experiments",
+    responses=errors(401),
+)
 async def list_experiments(
     service: ServiceDep,
     principal: PrincipalDep,
@@ -122,7 +132,12 @@ async def list_experiments(
     )
 
 
-@router.get("/{experiment_id}", response_model=ExperimentDetailSchema)
+@router.get(
+    "/{experiment_id}",
+    response_model=ExperimentDetailSchema,
+    summary="Get an experiment",
+    responses=errors(401, 404),
+)
 async def get_experiment(
     experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> ExperimentDetailSchema:
@@ -137,7 +152,10 @@ async def get_experiment(
 
 
 @router.get(
-    "/{experiment_id}/results", response_model=ExperimentResultPageSchema
+    "/{experiment_id}/results",
+    response_model=ExperimentResultPageSchema,
+    summary="List experiment results",
+    responses=errors(401, 404),
 )
 async def list_results(
     experiment_id: uuid.UUID,
@@ -182,6 +200,9 @@ async def _enqueue_response(
     "/{experiment_id}/start",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=ExperimentEnqueueSchema,
+    summary="Start an experiment",
+    description="Enqueue its cases. 202 means submitted, not executed.",
+    responses=errors(401, 404, 409),
 )
 async def start_experiment(
     experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
@@ -195,7 +216,12 @@ async def start_experiment(
     return await _enqueue_response(service, principal, experiment_id, enqueued)
 
 
-@router.post("/{experiment_id}/cancel", response_model=ExperimentSchema)
+@router.post(
+    "/{experiment_id}/cancel",
+    response_model=ExperimentSchema,
+    summary="Cancel an experiment",
+    responses=errors(401, 404, 409),
+)
 async def cancel_experiment(
     experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
 ) -> ExperimentSchema:
@@ -212,6 +238,9 @@ async def cancel_experiment(
     "/{experiment_id}/retry-failed",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=ExperimentEnqueueSchema,
+    summary="Retry failed cases",
+    description="Enqueue only the failed cases; successful ones are not rerun.",
+    responses=errors(401, 404, 409),
 )
 async def retry_failed(
     experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep

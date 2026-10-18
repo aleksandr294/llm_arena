@@ -58,6 +58,7 @@ llm-arena/
 │       ├── router.py
 │       ├── utils.py
 │       └── endpoints/
+├── admin/                       # fastadmin panel, per-component admin classes
 ├── components/
 │   ├── core/                    # Base classes, config, DB, BaseRepository
 │   └── <component_name>/

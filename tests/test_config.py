@@ -165,3 +165,105 @@ def test_jwt_settings_defaults_and_masking(monkeypatch: MonkeyPatch) -> None:
     assert settings.jwt_issuer == "llm-arena"
     rendered = repr(settings) + str(settings) + settings.model_dump_json()
     assert secret not in rendered
+
+
+ADMIN_SECRET = "an-admin-secret-with-at-least-32-characters"
+
+
+def test_admin_settings_defaults(monkeypatch: MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    for name in (
+        "ADMIN_SECRET_KEY",
+        "ADMIN_SESSION_COOKIE_SECURE",
+        "API_DOCS_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = SettingsSchema(_env_file=None)
+
+    assert settings.admin_secret_key is None
+    assert settings.admin_session_cookie_secure is True
+    assert settings.admin_session_ttl_seconds == 28800
+    assert settings.api_docs_enabled is True
+
+
+@pytest.mark.parametrize("ttl", ["0", "59", "-1"])
+def test_admin_session_ttl_below_minimum_rejected(
+    monkeypatch: MonkeyPatch, ttl: str
+) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv("ADMIN_SESSION_TTL_SECONDS", ttl)
+
+    with pytest.raises(ValidationError):
+        SettingsSchema(_env_file=None)
+
+
+def test_admin_session_ttl_is_configurable(monkeypatch: MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv("ADMIN_SESSION_TTL_SECONDS", "3600")
+
+    assert SettingsSchema(_env_file=None).admin_session_ttl_seconds == 3600
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_admin_secret_is_unset(
+    monkeypatch: MonkeyPatch, blank: str
+) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv("ADMIN_SECRET_KEY", blank)
+
+    assert SettingsSchema(_env_file=None).admin_secret_key is None
+
+
+def test_admin_secret_valid_and_masked(monkeypatch: MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv("ADMIN_SECRET_KEY", ADMIN_SECRET)
+
+    settings = SettingsSchema(_env_file=None)
+
+    assert settings.admin_secret_key is not None
+    assert settings.admin_secret_key.get_secret_value() == ADMIN_SECRET
+    rendered = repr(settings) + str(settings) + settings.model_dump_json()
+    assert ADMIN_SECRET not in rendered
+
+
+@pytest.mark.parametrize("secret", ["short-admin-secret", "x" * 31])
+def test_weak_admin_secret_rejected_without_echo(
+    monkeypatch: MonkeyPatch, secret: str
+) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv("ADMIN_SECRET_KEY", secret)
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    message = str(exc.value)
+    assert "admin_secret_key" in message
+    assert secret not in message
+
+
+def test_admin_secret_equal_to_jwt_secret_rejected_without_echo(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _base_env(monkeypatch)
+    shared = "a-shared-secret-value-with-32-plus-characters"
+    monkeypatch.setenv("JWT_SECRET_KEY", shared)
+    monkeypatch.setenv("ADMIN_SECRET_KEY", shared)
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    message = str(exc.value)
+    assert "admin_secret_key" in message
+    assert shared not in message
+
+
+def test_admin_cookie_and_docs_flags_parse(monkeypatch: MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv("ADMIN_SESSION_COOKIE_SECURE", "false")
+    monkeypatch.setenv("API_DOCS_ENABLED", "false")
+
+    settings = SettingsSchema(_env_file=None)
+
+    assert settings.admin_session_cookie_secure is False
+    assert settings.api_docs_enabled is False

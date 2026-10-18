@@ -21,8 +21,19 @@ def _jwt_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def app() -> FastAPI:
     from api.app import create_app
+    from components.core.config import SettingsSchema
 
-    return create_app()
+    # Explicit settings so unit tests need no DATABASE_URL in the environment;
+    # the placeholders are never connected to.
+    return create_app(
+        SettingsSchema(
+            database_url="postgresql+asyncpg://unused/unused",
+            rabbitmq_url="amqp://unused/",
+            jwt_secret_key=TEST_JWT_SECRET,
+            admin_secret_key=None,
+            _env_file=None,
+        )
+    )
 
 
 @pytest.fixture
