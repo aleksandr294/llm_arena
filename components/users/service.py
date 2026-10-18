@@ -1,81 +1,29 @@
 """User use cases: bootstrap (CLI only) and role-checked management."""
 
-import re
 import uuid
 from collections.abc import Sequence
-from typing import Final
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from components.auth.security import (
-    PasswordPolicyError,
-    hash_password,
-    validate_password_policy,
-)
+from components.auth.exceptions import PasswordPolicyError
+from components.auth.security import hash_password, validate_password_policy
 from components.auth.service import AuthService
 from components.core.config import SettingsSchema
 from components.core.enums import Role
 from components.core.schemas import Principal
 from components.organizations.repository import OrganizationRepository
+from components.users.exceptions import (
+    DuplicateEmailError,
+    InvalidEmailError,
+    UserConflictError,
+    UserForbiddenError,
+    UserInputError,
+    UserNotFoundError,
+)
 from components.users.models import User
 from components.users.repository import UserRepository
-
-EMAIL_MAX_LENGTH: Final = 254
-# Deliberately simple: one "@", a dotted domain, printable ASCII only (no
-# whitespace, controls or non-ASCII). ASCII keeps ``lower()`` length-stable
-# and free of locale surprises. Deliverability is not checked.
-_LOCAL: Final = r"[\x21-\x3f\x41-\x7e]+"
-_LABEL: Final = r"[\x21-\x2d\x2f-\x3f\x41-\x7e]+"
-_EMAIL_PATTERN: Final = re.compile(rf"{_LOCAL}@{_LABEL}(\.{_LABEL})+")
-
-
-class InvalidEmailError(ValueError):
-    pass
-
-
-class DuplicateEmailError(Exception):
-    def __init__(self) -> None:
-        super().__init__("a user with this email already exists")
-
-
-class UserForbiddenError(Exception):
-    def __init__(self) -> None:
-        super().__init__("forbidden")
-
-
-class UserNotFoundError(Exception):
-    """Also raised for users outside the caller's scope, so their
-    existence is not disclosed."""
-
-    def __init__(self) -> None:
-        super().__init__("user not found")
-
-
-class UserConflictError(Exception):
-    """The change would lock the caller out of their own account."""
-
-
-class UserInputError(ValueError):
-    """Invalid input; ``field`` names the offending request field."""
-
-    def __init__(self, field: str, message: str) -> None:
-        super().__init__(message)
-        self.field = field
-
-
-def normalize_email(email: str) -> str:
-    """Trim and validate. Case is preserved (uniqueness ignores it)."""
-    value = email.strip()
-    if (
-        "\x00" in value
-        or len(value) > EMAIL_MAX_LENGTH
-        # The stored ``email_lower`` column has the same bound.
-        or len(value.lower()) > EMAIL_MAX_LENGTH
-        or not _EMAIL_PATTERN.fullmatch(value)
-    ):
-        raise InvalidEmailError("email is not valid")
-    return value
+from components.users.utils import normalize_email
 
 
 class UserService:

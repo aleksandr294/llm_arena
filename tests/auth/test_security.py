@@ -12,11 +12,13 @@ import pytest
 from argon2 import PasswordHasher
 
 from components.auth import security
-from components.auth.security import (
+from components.auth.enums import TokenType
+from components.auth.exceptions import (
     ExpiredTokenError,
     InvalidTokenError,
     PasswordPolicyError,
-    TokenType,
+)
+from components.auth.security import (
     create_access_token,
     create_refresh_token,
     decode_token,

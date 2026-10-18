@@ -4,16 +4,20 @@ whose messages never contain tokens, hashes, passwords or emails."""
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import StrEnum
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from components.auth.enums import RejectionReason, TokenType
+from components.auth.exceptions import (
+    AccessTokenRejectedError,
+    ExpiredTokenError,
+    InvalidCredentialsError,
+    InvalidRefreshTokenError,
+    InvalidTokenError,
+)
 from components.auth.repository import RefreshTokenRepository
 from components.auth.security import (
-    ExpiredTokenError,
-    InvalidTokenError,
     IssuedToken,
-    TokenType,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -29,32 +33,6 @@ from components.core.schemas import Principal
 from components.organizations.repository import OrganizationRepository
 from components.users.models import User
 from components.users.repository import UserRepository
-
-
-class InvalidCredentialsError(Exception):
-    """Unknown email, wrong password, or inactive user or organization."""
-
-    def __init__(self) -> None:
-        super().__init__("invalid credentials")
-
-
-class InvalidRefreshTokenError(Exception):
-    """Refresh token is malformed, expired, revoked, used or unknown."""
-
-    def __init__(self) -> None:
-        super().__init__("invalid refresh token")
-
-
-class RejectionReason(StrEnum):
-    EXPIRED = "expired"
-    INVALID = "invalid"
-    REVOKED = "revoked"
-
-
-class AccessTokenRejectedError(Exception):
-    def __init__(self, reason: RejectionReason) -> None:
-        super().__init__(f"access token rejected: {reason.value}")
-        self.reason = reason
 
 
 @dataclass(frozen=True, slots=True)

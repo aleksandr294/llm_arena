@@ -4,8 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from components.auth.enums import RejectionReason
 from components.auth.security import PASSWORD_MAX_LENGTH
-from components.auth.service import RejectionReason
 from components.core.enums import Role
 from components.core.schemas import NoNulStr
 

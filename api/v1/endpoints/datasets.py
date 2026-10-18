@@ -9,6 +9,7 @@ from api.v1.utils import CreatedRangeSchema, get_created_range, get_principal
 from components.core.database import get_session
 from components.core.exceptions import OrganizationRequiredError
 from components.core.schemas import Principal
+from components.datasets.exceptions import DatasetNotFoundError
 from components.datasets.schemas import (
     DatasetCreateSchema,
     DatasetDetailSchema,
@@ -18,7 +19,7 @@ from components.datasets.schemas import (
     TestCasePageSchema,
     TestCaseSchema,
 )
-from components.datasets.service import DatasetNotFoundError, DatasetService
+from components.datasets.service import DatasetService
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 

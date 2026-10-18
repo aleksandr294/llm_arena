@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from components.auth.security import PASSWORD_MAX_LENGTH
 from components.core.enums import Role
 from components.core.schemas import NoNulStr
-from components.users.service import EMAIL_MAX_LENGTH
+from components.users.utils import EMAIL_MAX_LENGTH
 
 
 class UserCreateSchema(BaseModel):

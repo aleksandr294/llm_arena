@@ -10,13 +10,10 @@ from typing import Annotated
 
 import typer
 
-from components.auth.security import PasswordPolicyError
+from components.auth.exceptions import PasswordPolicyError
 from components.core.database import get_session_factory
-from components.users.service import (
-    DuplicateEmailError,
-    InvalidEmailError,
-    UserService,
-)
+from components.users.exceptions import DuplicateEmailError, InvalidEmailError
+from components.users.service import UserService
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 

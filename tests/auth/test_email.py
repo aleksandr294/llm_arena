@@ -1,6 +1,7 @@
 import pytest
 
-from components.users.service import InvalidEmailError, normalize_email
+from components.users.exceptions import InvalidEmailError
+from components.users.utils import normalize_email
 
 
 @pytest.mark.parametrize(

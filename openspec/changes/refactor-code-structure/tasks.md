@@ -10,7 +10,7 @@
 
 ## 3. Component modules
 
-- [ ] 3.1 Move exceptions, enums, public data classes and reusable helpers for datasets, organizations, users and auth to their `exceptions.py`, `enums.py`, `utils.py` and `schemas.py` per the move map in design.md (no re-exports, update all imports and tests), and verify the import check shows no cycles and the tests of these components pass unchanged
+- [x] 3.1 Move exceptions, enums, public data classes and reusable helpers for datasets, organizations, users and auth to their `exceptions.py`, `enums.py`, `utils.py` and `schemas.py` per the move map in design.md (no re-exports, update all imports and tests), and verify the import check shows no cycles and the tests of these components pass unchanged
 - [ ] 3.2 Do the same for experiments, evaluation and metrics (including `ExportFormat` out of the endpoint module and `logic.py` helpers to `utils.py`), and verify the import check and the tests of these components pass unchanged
 - [ ] 3.3 Do the same for `third_party/llm` and the admin package (`SessionUser` and shared dataclasses), and verify the import check, `ruff`, `mypy` and the full test suite pass and the OpenAPI schema equals the baseline
 

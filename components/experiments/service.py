@@ -6,11 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.core.access import require_organization
 from components.core.schemas import Principal
+from components.datasets.exceptions import DatasetNotFoundError
 from components.datasets.repository import (
     DatasetRepository,
     TestCaseRepository,
 )
-from components.datasets.service import DatasetNotFoundError
 from components.experiments.logic import render_prompt
 from components.experiments.models import (
     Experiment,

@@ -8,11 +8,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from components.core.exceptions import OrganizationRequiredError
 from components.core.schemas import Principal
+from components.datasets.exceptions import DatasetNotFoundError
 from components.datasets.schemas import (
     DatasetCreateSchema,
     TestCaseCreateSchema,
 )
-from components.datasets.service import DatasetNotFoundError, DatasetService
+from components.datasets.service import DatasetService
 from tests.access import Actors
 
 pytestmark = pytest.mark.integration

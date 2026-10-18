@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.core.enums import Role
 from components.core.exceptions import OrganizationRequiredError
+from components.datasets.exceptions import DatasetNotFoundError
 from components.datasets.models import TestCase
-from components.datasets.service import DatasetNotFoundError
 from components.experiments.models import (
     Experiment,
     ExperimentResult,

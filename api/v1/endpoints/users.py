@@ -11,20 +11,20 @@ from components.core.config import SettingsSchema
 from components.core.database import get_session
 from components.core.enums import Role
 from components.core.schemas import Principal
+from components.users.exceptions import (
+    DuplicateEmailError,
+    UserConflictError,
+    UserForbiddenError,
+    UserInputError,
+    UserNotFoundError,
+)
 from components.users.schemas import (
     UserCreateSchema,
     UserPageSchema,
     UserSchema,
     UserUpdateSchema,
 )
-from components.users.service import (
-    DuplicateEmailError,
-    UserConflictError,
-    UserForbiddenError,
-    UserInputError,
-    UserNotFoundError,
-    UserService,
-)
+from components.users.service import UserService
 
 router = APIRouter(prefix="/users", tags=["users"])
 

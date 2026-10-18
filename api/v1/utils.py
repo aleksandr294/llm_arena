@@ -8,7 +8,8 @@ from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from components.auth.service import AccessTokenRejectedError, AuthService
+from components.auth.exceptions import AccessTokenRejectedError
+from components.auth.service import AuthService
 from components.core.config import SettingsSchema, get_settings
 from components.core.database import get_session
 from components.core.schemas import Principal

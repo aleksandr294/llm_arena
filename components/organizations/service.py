@@ -7,18 +7,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.auth.repository import RefreshTokenRepository
+from components.organizations.exceptions import (
+    DuplicateOrganizationNameError,
+    OrganizationNotFoundError,
+)
 from components.organizations.models import Organization
 from components.organizations.repository import OrganizationRepository
-
-
-class OrganizationNotFoundError(Exception):
-    def __init__(self) -> None:
-        super().__init__("organization not found")
-
-
-class DuplicateOrganizationNameError(Exception):
-    def __init__(self) -> None:
-        super().__init__("an organization with this name already exists")
 
 
 class OrganizationService:

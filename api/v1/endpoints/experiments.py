@@ -10,7 +10,7 @@ from components.core.config import get_settings
 from components.core.database import get_session
 from components.core.exceptions import OrganizationRequiredError
 from components.core.schemas import Principal
-from components.datasets.service import DatasetNotFoundError
+from components.datasets.exceptions import DatasetNotFoundError
 from components.experiments.models import ExperimentStatus, ResultStatus
 from components.experiments.schemas import (
     ExperimentCreateSchema,
