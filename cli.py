@@ -19,7 +19,7 @@ from components.users.exceptions import DuplicateEmailError, InvalidEmailError
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
-PASSWORD_ENV = "SUPERADMIN_PASSWORD"
+PASSWORD_ENV = "SUPERADMIN_PASSWORD"  # nosec B105 - name of an env variable, not a password
 
 
 @app.callback()

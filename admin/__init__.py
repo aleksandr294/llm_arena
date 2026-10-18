@@ -35,7 +35,10 @@ ADMIN_MODULES: list[str] = [
 
 def _export_environment(settings: SettingsSchema) -> str:
     """Set the variables fastadmin reads at import time; return the secret."""
-    assert settings.admin_secret_key is not None
+    if settings.admin_secret_key is None:
+        raise RuntimeError(
+            "ADMIN_SECRET_KEY is not set; the admin panel cannot be configured"
+        )
     secret = settings.admin_secret_key.get_secret_value()
     os.environ["ADMIN_SECRET_KEY"] = secret
     os.environ["ADMIN_USER_MODEL"] = "User"
@@ -69,8 +72,8 @@ def mount_admin(app: FastAPI, settings: SettingsSchema) -> bool:
     imported = sys.modules.get("fastadmin.settings")
     if (
         imported is not None
-        and imported.settings.ADMIN_SECRET_KEY
-        != settings.admin_secret_key.get_secret_value()
+        and settings.admin_secret_key.get_secret_value()
+        != imported.settings.ADMIN_SECRET_KEY
     ):
         raise RuntimeError(
             "fastadmin was imported before mount_admin configured it; "

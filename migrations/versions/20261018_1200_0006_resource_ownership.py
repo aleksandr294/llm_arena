@@ -14,8 +14,8 @@ when the operator created it before the upgrade.
 import uuid
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "0006"
 down_revision: str | None = "0005"
@@ -53,8 +53,9 @@ def upgrade() -> None:
         op.add_column(
             table, sa.Column("organization_id", sa.Uuid(), nullable=True)
         )
+        backfill = f"UPDATE {table} SET organization_id = :org"  # nosec B608 - table names come from the module-level TABLES constant, never user input
         bind.execute(
-            sa.text(f"UPDATE {table} SET organization_id = :org"),
+            sa.text(backfill),
             {"org": default_id},
         )
         op.alter_column(table, "organization_id", nullable=False)
