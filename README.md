@@ -1,19 +1,116 @@
 # LLM Arena for Developers
 
-Backend platform for evaluating and comparing LLM providers and models. See
-`CLAUDE.md` for architecture and conventions.
+## Summary
 
-## Setup
+LLM Arena is a backend platform for evaluating and comparing LLM providers
+and models. The goal is reliable, reproducible evaluation rather than simply
+showing responses side by side.
+
+You can:
+
+- create and manage datasets of evaluation cases;
+- configure and run experiments that send the cases to several models
+  (OpenAI and Anthropic today) through a worker;
+- judge the stored responses with deterministic evaluators;
+- compare quality, latency, token usage, estimated cost and error rates per
+  model and export the results as JSON or CSV;
+- keep the data separated per organization, with roles and an optional
+  read-only admin panel.
+
+Results are stored case by case, so a partial failure never loses the
+successful ones, and failed cases can be retried on their own. Measured
+values (tokens, latency) are kept apart from estimated ones (cost), and a
+metric a provider did not report is stored as unknown, not as zero.
+
+`CLAUDE.md` holds the architecture rules and conventions that contributors
+(human or agent) follow.
+
+## Technical Stack
+
+Versions come from `pyproject.toml`, `poetry.lock`, the `Dockerfile` and
+`docker-compose.yml`.
+
+| area | choice |
+| --- | --- |
+| Language | Python 3.12 or newer (`>=3.12,<4.0`); the Docker image uses `python:3.12-slim` |
+| API | FastAPI, Uvicorn, Pydantic v2, pydantic-settings |
+| Database | PostgreSQL 17 (`postgres:17` image), SQLAlchemy 2 (async) with asyncpg, Alembic migrations |
+| Background work | Taskiq with `taskiq-aio-pika` on RabbitMQ 3.13 (`rabbitmq:3.13-management` image) |
+| LLM providers | OpenAI SDK, Anthropic SDK (behind a shared provider interface) |
+| Security | PyJWT (access tokens), argon2-cffi (password hashes) |
+| CLI | Typer |
+| Admin panel | fastadmin `~0.10` (optional, off by default) |
+| Packaging | Poetry (virtualenv in `.venv`, see `poetry.toml`) |
+| Quality | Ruff, Black (80 columns), mypy (strict), pre-commit, pytest with pytest-asyncio |
+| Containers | Docker and Docker Compose (`docker-compose.yml`), see below for Podman |
+
+Exact locked versions are in `poetry.lock`.
+
+### Docker Compose or Podman
+
+`docker-compose.yml` defines four services: `api`, `worker`, `postgres` and
+`rabbitmq`.
+
+- Docker: `docker compose ...` (verified with Docker 29 and Compose v5).
+- Podman: Podman 5.7 is installed on the development machine and
+  `podman compose` is a thin wrapper that runs an external compose provider;
+  here it resolves to the same Docker Compose plugin (`podman compose
+  version` prints the Compose version). Starting this stack with Podman
+  (rootless networking, the `x-app` YAML anchors, health-check conditions)
+  was **not tested**. If you try it, use `podman compose up -d postgres
+  rabbitmq` in place of the `docker compose` commands below and check that
+  both containers become healthy.
+
+## How to start locally
+
+### Prerequisites
+
+- Python 3.12 or newer and [Poetry](https://python-poetry.org/)
+- Docker with Compose (or Podman, untested, see above) for PostgreSQL and
+  RabbitMQ
+- optional: an OpenAI and/or Anthropic API key to run real experiments
+
+### Setup
 
 ```bash
 poetry install
-cp .env.example .env          # replace placeholder credentials and set
-                              # JWT_SECRET_KEY (see Authentication)
+cp .env.example .env          # then edit it, see below
 docker compose up -d postgres rabbitmq
 set -a; . ./.env; set +a      # export settings for local commands
 ```
 
-## Run
+Edit `.env`:
+
+- Replace the `change-me` passwords. `DATABASE_URL`, `RABBITMQ_URL` and the
+  `POSTGRES_*` / `RABBITMQ_DEFAULT_*` values used by docker compose must
+  agree.
+- `JWT_SECRET_KEY` is **required**: at least 32 random characters. The
+  placeholder from `.env.example` is rejected at startup. Generate one with
+
+  ```bash
+  python -c "import secrets; print(secrets.token_urlsafe(48))"
+  ```
+
+- Optional: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` (a provider without a key
+  is unavailable), `LLM_MAX_CONCURRENCY`, `PRICING_FILE` (see
+  `docs/pricing.example.json`), `API_DOCS_ENABLED`.
+- Optional: `ADMIN_SECRET_KEY` (at least 32 characters, different from
+  `JWT_SECRET_KEY`) turns the admin panel on; leave it empty to keep it off.
+  Set `ADMIN_SESSION_COOKIE_SECURE=false` only for plain-HTTP development.
+
+Never commit `.env`.
+
+### Prepare the database
+
+```bash
+alembic upgrade head
+python cli.py create-superadmin --email root@example.com   # asks for a password
+```
+
+The password comes from a hidden prompt or from `SUPERADMIN_PASSWORD`; it is
+never a command-line argument and is at least 12 characters.
+
+### Run
 
 ```bash
 python main.py API                       # API on API_HOST:API_PORT
@@ -24,741 +121,248 @@ taskiq worker taskiq_app:broker --fs-discover \
 If RabbitMQ is unreachable the worker logs an `AMQPConnectionError` for the
 broker URL (password masked) and retries every 5 seconds.
 
-Health endpoints: `GET /api/v1/health/live` (process only) and
-`GET /api/v1/health/ready` (PostgreSQL and RabbitMQ; 503 if any is failing).
-
-The whole stack: `docker compose up --build`.
-
-## Datasets API
-
-Every dataset, experiment, evaluation, metrics and export endpoint requires
-an access token (see Authentication and users), and each caller sees only
-the data allowed by their role (see Access control and ownership). The
-examples below assume `TOKEN` holds an access token from `/auth/login` of a
-`staff` or `admin` user.
-
-A dataset is a named, ordered set of test cases. Test cases are append-only:
-each gets the next position (1, 2, ...) in its dataset. Content is stored and
-returned exactly as supplied.
+The whole stack in containers (API, worker, PostgreSQL, RabbitMQ):
 
 ```bash
-# create a dataset (201); name is trimmed, description is optional
-curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/datasets \
-    -H 'Content-Type: application/json' \
-    -d '{"name": "Capitals", "description": "Geography smoke test"}'
-
-# list (limit 1-100, default 50; offset >= 0) and get (includes case_count)
-curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/datasets?limit=10&offset=0'
-curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/datasets/<dataset_id>
-
-# add a test case (201); expected_output and metadata (object) are optional
-curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/datasets/<dataset_id>/cases \
-    -H 'Content-Type: application/json' \
-    -d '{"input": "Capital of France?", "expected_output": "Paris",
-         "metadata": {"topic": "geo"}}'
-
-# list test cases ordered by position
-curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/datasets/<dataset_id>/cases?limit=10'
+docker compose up --build
 ```
 
-List responses have the form `{items, total, limit, offset}`. Invalid input
-returns 422 naming the field; an unknown dataset returns 404.
+The containers do not run migrations; apply `alembic upgrade head` against
+the database first (for the compose database from the host, use the
+`localhost` `DATABASE_URL` from `.env`).
 
-## Experiments API
+### Check that it works
 
-An experiment runs every test case of a dataset against one or more model
-targets using a prompt template, and stores each case/target pair as its own
-result. Creating an experiment makes no model request: it freezes the case
-set and the exact rendered prompt of every result (`pending`). Later dataset
-edits do not change an existing experiment. Comparison and cost estimates are described
-under the metrics API below; deterministic evaluation is described below.
+- `GET http://localhost:8000/api/v1/health/live` checks the process only.
+- `GET http://localhost:8000/api/v1/health/ready` also checks PostgreSQL and
+  RabbitMQ (503 if any is failing).
+- Swagger UI at `http://localhost:8000/docs` (see
+  [Interactive API documentation](docs/api-documentation.md)); sign in with
+  `POST /api/v1/auth/login` using the superadmin you created.
 
-```bash
-# create (201). {input} is required in prompt_template; {expected_output}
-# is optional. Each target's provider needs its API key configured (else 422).
-curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments \
-    -H 'Content-Type: application/json' \
-    -d '{"name": "capitals-v1", "dataset_id": "<dataset_id>",
-         "prompt_template": "Answer briefly: {input}",
-         "config": {"targets": [{"provider": "openai", "model": "<model>"},
-                                {"provider": "anthropic", "model": "<model>"}],
-                    "system_prompt": "Be concise.", "temperature": 0,
-                    "max_tokens": 256, "timeout_seconds": 60,
-                    "max_attempts": 3}}'
+## Commands
 
-# list, detail (config + status_counts) and results (limit 1-100, offset,
-# optional status filter: pending|running|succeeded|failed|cancelled)
-curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/experiments?limit=10'
-curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/experiments/<experiment_id>
-curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/experiments/<experiment_id>/results?status=failed&limit=20'
-
-# start (202): enqueue the pending results for the worker
-curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments/<experiment_id>/start
-
-# cancel (200) and retry only the failed results (202)
-curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments/<experiment_id>/cancel
-curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments/<experiment_id>/retry-failed
-```
-
-`start` and `retry-failed` return `{"experiment": {...}, "enqueued": N}`.
-`202` and `enqueued` mean the tasks were submitted, not that anything ran:
-poll the experiment detail and its `status_counts`. Errors: unknown
-experiment or dataset `404`; an action not allowed in the current status
-`409`; invalid input `422` with `detail` entries that name the field in
-`loc` (for example `["body", "config", "targets"]`).
-
-Execution needs a running worker (see Run). Limits: at most 10 targets, at
-most 10 000 results (cases times targets) per experiment, `max_attempts`
-1-5, `timeout_seconds` above 0 and at most 120.
-
-### Status model
-
-- Result: `pending -> running -> succeeded | failed`; `pending -> cancelled`;
-  `failed -> pending` on `retry-failed`.
-- Experiment: `pending -> running -> completed | partially_failed | failed`;
-  `pending | running -> cancelled`; `partially_failed | failed -> running`
-  on `retry-failed`. `completed` and `cancelled` are final. The final status
-  is written when the last result finishes: `completed` (all succeeded),
-  `partially_failed` (some succeeded), `failed` (none succeeded).
-- Stored metrics are measured values only (tokens as reported by the
-  provider, latency measured by the adapter); a missing value is `null`, not
-  zero.
-
-### Cancellation and retry
-
-- `cancel` marks pending results `cancelled` immediately. Results already
-  running finish and are stored, then the experiment becomes `cancelled`.
-  Cancelling a final experiment returns 409. A cancelled experiment keeps
-  the status `cancelled` even when some of its results succeeded or failed;
-  see `status_counts` for the breakdown. It cannot be
-  restarted or retried.
-- `retry-failed` re-runs only failed results (successful ones are untouched)
-  and returns 409 unless the experiment is `partially_failed` or `failed`.
-- `start` on a `running` experiment re-enqueues its still-pending results
-  and its stale `running` results (running longer than the 1800 second
-  lease, left by a crashed worker). This recovers from lost messages and
-  crashes: call `start` again. Duplicate delivery is safe: a result is
-  claimed atomically, and one that is already finished or owned is skipped.
-  A worker whose lease was reclaimed cannot overwrite the new outcome.
-- A retryable provider error (timeout, rate limit, server error) is retried
-  inside the task with exponential backoff (capped at 30 seconds) up to
-  `max_attempts`; other errors fail immediately. `error_kind` and a generic
-  `error_message` are stored; provider error text, prompts and API keys are
-  never logged or stored in error fields.
-
-### Worker concurrency
-
-`LLM_MAX_CONCURRENCY` (default 4) bounds simultaneous model requests per
-provider inside one worker process. It is per process: total in-flight
-requests are roughly worker processes times this value, and there is no
-global limit across workers. Taskiq's own parallelism is set with worker
-options, for example `taskiq worker ... --workers 2 --max-async-tasks 20`;
-backoff sleeps hold a task slot but not a request slot.
-
-## Evaluation API
-
-Evaluation judges stored responses with deterministic checks. It is separate
-from generation: an evaluation never changes a result's text or status, and
-no model is called. Evaluators run in the worker (`evaluation.evaluate_result`,
-one task per succeeded result) right after a result succeeds, and their
-outcomes are stored as one row per result and evaluator. Failed or cancelled
-generations are not evaluated.
-
-### Evaluator configuration
-
-Pass `evaluator_config` when creating an experiment:
-
-```json
-{"evaluators": [
-  {"id": "exact", "type": "exact_match", "case_sensitive": false},
-  {"id": "no_apology", "type": "not_contains", "values": ["sorry"]},
-  {"id": "shape", "type": "json_fields", "required": ["answer"],
-   "types": {"answer": "string"}}
-]}
-```
-
-`id` is unique within the experiment (1-64 characters) and names the
-evaluator in results; `type` selects the evaluator. At most 20 entries. `{}`,
-or an omitted field, or an empty list means no evaluation. Unknown
-parameters are rejected. The stored configuration has every default filled
-in (the detail response shows it), so later changes to a default do not
-alter an existing experiment; each stored outcome also records the evaluator
-`type` and `version`.
-
-Every outcome is `passed`, `failed`, `skipped` (the check does not apply) or
-`error` (the evaluator itself raised; only the exception class name is
-stored). `details` hold a machine-readable `reason` and configured values'
-indexes or paths, never response text.
-
-| type | parameters (defaults) | outcomes and details |
-| --- | --- | --- |
-| `exact_match` | `trim` (true), `case_sensitive` (true), `collapse_whitespace` (false) | compares with the case's `expected_output` (`collapse_whitespace` also removes leading and trailing whitespace, even with `trim` false); `skipped` (`no_expected_output`) without one; else `passed` (`match`) or `failed` (`mismatch`) |
-| `contains` | `values` (1-20 strings, required), `mode` (`all` or `any`, default `all`), `case_sensitive` (true) | `passed` (`all_found`, `found`) or `failed` (`missing_values` with `missing_indexes`, `none_found`) |
-| `not_contains` | `values` (1-20 strings, required), `case_sensitive` (true) | `passed` (`none_found`) or `failed` (`forbidden_values_found` with `found_indexes`) |
-| `length_between` | `min_length`, `max_length` (characters; at least one required) | `passed` (`in_range`) or `failed` (`too_short`, `too_long`), with `length` |
-| `json_valid` | `require_object` (false) | the stripped response must be strict JSON (no `NaN`); `failed` reasons `invalid_json`, `contains_nul`, `too_deep`, `not_object` |
-| `json_fields` | `required` (dot paths), `types` (dot path to `string`, `number`, `integer`, `boolean`, `array`, `object` or `null`); one of them is required | the response must be a JSON object; `failed` with the lists `missing` and `mistyped`, or the `json_valid` reasons. Paths walk object keys only; booleans are not numbers |
-
-Invalid configuration returns 422 with the path in `loc`, for example
-`["body", "evaluator_config", "evaluators", 1]` for an unknown type,
-`["body", "evaluator_config", "evaluators"]` for a duplicate id, and
-`["body", "evaluator_config", "evaluators", 0, "contains", "values"]` for an
-empty `values` (the evaluator type appears in the path of its parameters).
-An experiment whose stored configuration predates this feature and no longer
-parses is treated as having no evaluators (evaluation is disabled for it and
-only a warning is logged). A succeeded result without stored response text
-gets an `error` outcome (`missing_response`) per evaluator.
-
-### Endpoints
-
-```bash
-# backfill (202): enqueue evaluation of succeeded results that lack an
-# outcome for some configured evaluator
-curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments/<experiment_id>/evaluate
-
-# outcomes (limit 1-100, default 50; offset >= 0; optional evaluator_id and
-# status filters: passed|failed|skipped|error)
-curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/experiments/<experiment_id>/evaluations?evaluator_id=exact&status=failed&limit=20'
-
-# per-evaluator outcome counts
-curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/experiments/<experiment_id>/evaluations/summary
-```
-
-`evaluate` returns `{"experiment_id": "...", "enqueued": N, "remaining": M}`:
-at most 1000 results are enqueued per request (in case order), and
-`remaining` is how many still lack an evaluation after this batch, so a large
-backlog is processed by calling it again. As with
-`start`, `202` means the tasks were submitted, not that they ran: it needs a
-running worker, and the outcome is visible through the other two endpoints.
-Backfill is for missed triggers (a lost message, an experiment evaluated
-before its worker was up); it is idempotent, so repeating it or duplicate
-delivery never creates a second row or changes a stored outcome, and it
-returns `enqueued: 0` when nothing is missing or no evaluators are
-configured. Results already evaluated are not recomputed. List responses
-have the form `{items, total, limit, offset}`, ordered by case position,
-target and evaluator id; an item has `id`, `experiment_result_id`,
-`evaluator_id`, `evaluator_type`, `evaluator_version`, `status`, `details`
-and `created_at`, and never the response text (read that from the results
-endpoint). The summary is
-`{"evaluators": [{"id", "type", "version", "passed", "failed", "skipped",
-"error"}], "unevaluated_results": N}` with explicit zeros;
-`unevaluated_results` is the number of succeeded results still lacking an
-outcome for at least one configured evaluator, so a non-zero value means
-evaluation is pending or `evaluate` is needed. Unknown experiment `404`;
-invalid pagination, filter value or id `422`.
-
-Not included: regular expressions, JSON Schema validation, LLM-as-a-judge,
-and overall scores (per-evaluator pass rates are in the metrics API).
-
-## Metrics and comparison API
-
-Read-only views over the stored results of an experiment. Nothing is
-persisted: every number is computed from the committed rows at request time,
-so a running experiment gives a snapshot (`finished` is `false` while any
-result is `pending` or `running`). Unknown values are `null`, never zero.
-Measured values (counts, latency, tokens) are kept apart from the estimated
-cost.
-
-```bash
-B=localhost:8000/api/v1/experiments/<experiment_id>
-
-# results by status, experiment status and the finished flag
-curl -H "Authorization: Bearer $TOKEN" $B/summary
-
-# per-target comparison: counts, error rate and kinds, latency, tokens,
-# evaluator pass rates and estimated cost
-curl -H "Authorization: Bearer $TOKEN" $B/comparison
-
-# per-case view (limit 1-100, default 50; offset >= 0; response text only
-# with include_responses=true, default false)
-curl -H "Authorization: Bearer $TOKEN" "$B/cases?limit=20&offset=0&include_responses=true"
-
-# export: format=json (default) or csv; include_responses defaults to true
-# for json and false for csv
-curl -H "Authorization: Bearer $TOKEN" -OJ "$B/export?format=json"
-curl -H "Authorization: Bearer $TOKEN" -OJ "$B/export?format=csv&include_responses=true"
-```
-
-An unknown experiment returns `404` (also for `export`, before anything is
-streamed); a bad `limit`, `offset`, `format`, boolean or id returns `422`.
-
-### Metric definitions
-
-Per target (`provider` + `model`), from the frozen configuration, so a target
-without results still appears with zeros and `null`s:
-
-- Counts: results per status. `error_rate = failed / (succeeded + failed)`;
-  `cancelled`, `pending` and `running` are excluded, and the rate is `null`
-  when that denominator is 0. `error_kinds` counts failed results per stored
-  `error_kind` (`unknown` when none was stored).
-- Latency (milliseconds): over succeeded results with a measured `latency_ms`
-  (the adapter-measured duration of the successful provider call, without
-  queueing or retry backoff). `count` is the sample size; `min_ms`, `max_ms`,
-  `mean_ms` (`avg`), `median_ms` and `p95_ms` come from PostgreSQL
-  `percentile_cont`, which interpolates linearly between neighbouring values.
-  With few samples p95 is close to the maximum.
-- Tokens: `total` sums a field over succeeded results that reported it, and
-  `reported_count` says how many did; `tokens.succeeded` is the denominator.
-  Coverage below that means the sum understates real usage. A missing count
-  is never treated as 0 and `total_tokens` is never computed as input plus
-  output.
-- Evaluators: `pass_rate = passed / (passed + failed)` per evaluator and
-  target; `skipped` and `error` are counted separately and excluded from the
-  rate. There is no weighting and no overall score.
-- Cost: an estimate, see below.
-
-### Pricing and estimated cost
-
-No prices are shipped. Costs exist only when `PRICING_FILE` points at a JSON
-file you maintain (see `docs/pricing.example.json`):
-
-```json
-{"version": "2025-01-prices", "currency": "USD",
- "rates": {"openai": {"<requested model id>": {
-     "input_per_million": 1.00, "output_per_million": 2.00}}}}
-```
-
-`rates` is keyed by provider, then by the requested model id (exact match,
-no fuzzy matching). Rates are non-negative numbers per million tokens; unknown
-keys are rejected. The example file contains placeholder numbers, not real
-prices: verify every rate against the provider's price list before relying on
-any cost.
-
-- Per target, `estimated_cost = sum(input_tokens * input_rate / 1e6 +
-  output_tokens * output_rate / 1e6)` over succeeded results that reported
-  both token counts; `results_included` and `results_excluded` say how many
-  results were or were not used. Cost is `null` when none qualifies, `priced`
-  is `false` for a model without a rate, and cost is not stored.
-- The response and the export state `pricing.version`, the currency and the
-  exact rates used. The file is re-read when it changes (no restart), and
-  historical costs are recomputed from it, so change `version` whenever you
-  change rates.
-- A missing or invalid file never fails the request: costs become `null` and
-  `pricing_error` names the file path and the reason (never its contents).
-
-### Export formats
-
-- JSON is one document streamed in batches: `experiment` (frozen prompt
-  template, generation and retry settings, targets, evaluator configuration),
-  `status`, `finished`, `comparison` (including the pricing used) and a
-  `results` array with one entry per result (case position, target, status,
-  attempts, latency, tokens, error kind, evaluator outcomes and, with
-  `include_responses`, `rendered_prompt` and `response_text`). Text is
-  preserved exactly.
-- CSV has a header and one row per result: `case_position, provider, model,
-  status, attempts, latency_ms, input_tokens, output_tokens, total_tokens,
-  error_kind`, one `eval:<evaluator id>` column per configured evaluator, and
-  `response_text` when requested. Unknown values are empty cells.
-- CSV formula protection: a text cell (provider, model, status, error kind,
-  evaluator outcome, response text) starting with `=`, `+`, `-`, `@`, a tab or
-  a carriage return gets a leading single quote, so spreadsheets do not run
-  model output as a formula. This alters those cells; use JSON when the exact
-  text matters.
-- Exports work in any status; check `finished` to tell partial exports from
-  final ones. The filename is `experiment-<experiment_id>.json|csv`.
-- Limitation: the status line is sent before the rows are read. If the
-  database fails mid-export the server logs the failure (id, format and row
-  count only) and ends the stream early with status 200: truncated JSON does
-  not parse, and for CSV compare the row count with `summary.counts.total`.
-
-## Authentication and users
-
-Users belong to organizations and sign in with email and password. A login
-returns a short-lived access token (JWT) and a refresh token; both are
-signed with `JWT_SECRET_KEY` (HS256).
-
-### Roles
-
-| role | organization | can do |
-| --- | --- | --- |
-| `superadmin` | none | everything: manage organizations, create and manage `admin` and `staff` users in any organization. Created only with the CLI below |
-| `admin` | exactly one | create and manage `staff` and `admin` users in their own organization |
-| `staff` | exactly one | sign in and read their own user record |
-
-Role and active state are read from the database on every request, so a
-role change or deactivation applies at once (a deactivated user or
-organization cannot sign in, refresh, or use an existing access token).
-Deactivating a user or changing their password revokes all their refresh
-tokens at once, so no new access token can be obtained. Access tokens that
-were already issued stay valid for their remaining lifetime (up to 15
-minutes by default) after a password change or logout; only deactivating the
-user or their organization stops them immediately, because they are
-re-checked against the database.
-Superadmins cannot be created, edited or deactivated over HTTP.
-
-### Settings
-
-| setting | default | meaning |
-| --- | --- | --- |
-| `JWT_SECRET_KEY` | none, required | signing key, at least 32 characters; the value from `.env.example` is rejected at startup |
-| `JWT_ACCESS_TTL_SECONDS` | 900 (15 minutes) | access token lifetime |
-| `JWT_REFRESH_TTL_SECONDS` | 604800 (7 days) | refresh token lifetime |
-| `JWT_ISSUER` | `llm-arena` | `iss` claim, checked on every token |
-
-Generate a key and never commit it:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
-
-Changing `JWT_SECRET_KEY` invalidates every issued token (all users must
-sign in again).
-
-### Create the first superadmin
-
-There is no HTTP endpoint for this. Run the CLI on a migrated database. The
-password is never an argument: it comes from `SUPERADMIN_PASSWORD` or from a
-hidden prompt (asked twice). The command prints only the new user id.
-
-```bash
-python cli.py create-superadmin --email root@example.com        # prompts
-SUPERADMIN_PASSWORD='...' python cli.py create-superadmin --email root@example.com
-```
-
-Emails are compared ignoring case; a duplicate or a weak password (policy:
-at least 12 characters) is refused with exit code 1.
-
-### Sign in, refresh, sign out
-
-```bash
-B=localhost:8000/api/v1
-
-# login -> {access_token, refresh_token, token_type: "bearer", expires_in}
-curl -X POST $B/auth/login -H 'Content-Type: application/json' \
-    -d '{"email": "root@example.com", "password": "<password>"}'
-
-# call a protected endpoint
-curl $B/organizations -H "Authorization: Bearer <access_token>"
-
-# validate any access token: always 200, {"valid": true, user_id,
-# organization_id, role, expires_at} or {"valid": false, "reason": ...}
-curl -X POST $B/auth/validate -H 'Content-Type: application/json' \
-    -d '{"token": "<access_token>"}'
-
-# refresh: returns a new pair and retires the old refresh token
-curl -X POST $B/auth/refresh -H 'Content-Type: application/json' \
-    -d '{"refresh_token": "<refresh_token>"}'
-
-# logout (204): ends the whole login (the token's family)
-curl -X POST $B/auth/logout -H 'Content-Type: application/json' \
-    -d '{"refresh_token": "<refresh_token>"}'
-```
-
-Refresh tokens are single use. Presenting a used one again is treated as
-theft: the whole login is revoked and the call returns 401, so the newest
-token of that login stops working too. There is no grace window by design:
-a legitimate client that retries a refresh after losing the response looks
-like a reuse and loses the whole login session, so it must sign in again.
-Logout accepts a correctly signed refresh token even if it has expired. Wrong credentials, unknown email,
-inactive user or organization all give the same 401. A missing, malformed,
-expired or revoked access token gives 401 with a `WWW-Authenticate: Bearer`
-header; a valid token without the needed role gives 403. Do not use the
-`validate` endpoint to learn why a login failed: its `reason` is for token
-holders only.
-
-### Organizations (superadmin only)
-
-```bash
-H="Authorization: Bearer <access_token>"
-J='Content-Type: application/json'
-
-curl -X POST $B/organizations -H "$H" -H "$J" -d '{"name": "Acme"}'   # 201
-curl "$B/organizations?limit=10&offset=0" -H "$H"
-curl $B/organizations/<organization_id> -H "$H"
-curl -X PATCH $B/organizations/<organization_id> -H "$H" -H "$J" \
-    -d '{"name": "Acme Inc", "is_active": true}'
-```
-
-Names are unique ignoring case (409 on a duplicate). Deactivating an
-organization blocks its users from signing in.
-
-### Users
-
-```bash
-# superadmin creates an admin (organization_id required)
-curl -X POST $B/users -H "$H" -H "$J" \
-    -d '{"email": "admin@acme.test", "password": "<password>",
-         "role": "admin", "organization_id": "<organization_id>"}'
-
-# an admin creates staff in their own organization (organization_id is
-# optional and must match theirs)
-curl -X POST $B/users -H "$H" -H "$J" \
-    -d '{"email": "staff@acme.test", "password": "<password>", "role": "staff"}'
-
-# list (limit 1-100; organization_id, role, is_active filters), get, update
-curl "$B/users?role=staff&is_active=true" -H "$H"
-curl $B/users/<user_id> -H "$H"
-curl -X PATCH $B/users/<user_id> -H "$H" -H "$J" \
-    -d '{"is_active": false}'    # also role (staff|admin) and password
-```
-
-Admins see and change only users of their own organization (others look
-like 404); staff see only themselves. You cannot change your own role or
-deactivate yourself. Responses never contain password hashes.
-
-### Current scope and limitations
-
-- Login has no rate limiting or lockout, per account or per IP, so put the
-  API behind a proxy that limits `/auth/login` and `/auth/refresh` if it is
-  exposed. Only the number of concurrent password hashes is bounded (4 per
-  process), which protects memory but does not stop guessing.
-- Emails are limited to printable ASCII (no spaces or non-ASCII letters, at
-  most 254 characters) so that case-insensitive uniqueness is predictable.
-  NUL characters are rejected in emails and organization names (422).
-- Access tokens are stateless for their short lifetime but are re-checked
-  against the database, so there is no separate access-token revocation
-  list.
-
-## Access control and ownership
-
-**Breaking change:** all dataset, experiment, evaluation, metrics and export
-endpoints now require `Authorization: Bearer <access_token>`. Without a valid
-token they answer 401 (`WWW-Authenticate: Bearer`). Only the health endpoints
-and `/auth/login|refresh|logout|validate` are public. Existing clients and
-scripts must sign in first.
-
-Datasets and experiments record who created them (`owner_id`) and the
-organization of the creator (`organization_id`); both are in every dataset
-and experiment response and are set by the server from the token. They are
-never read from a request body: sending `owner_id` or `organization_id` when
-creating a dataset or experiment has no effect.
-
-| role | sees and changes |
+| task | command |
 | --- | --- |
-| `staff` | only the datasets and experiments they own |
-| `admin` | everything in their own organization, whoever owns it |
-| `superadmin` | everything in every organization |
+| Run the API | `python main.py API` |
+| Run the worker | `taskiq worker taskiq_app:broker --fs-discover --tasks-pattern "components/*/tasks.py"` |
+| Start PostgreSQL and RabbitMQ | `docker compose up -d postgres rabbitmq` |
+| Start the whole stack | `docker compose up --build` |
+| Stop the stack | `docker compose down` |
+| Apply migrations | `alembic upgrade head` |
+| Show current revision | `alembic current` |
+| New migration | `alembic revision --autogenerate -m "message"` (review it before applying; register each component's `models` in `migrations/env.py`) |
+| Roll back one step | `alembic downgrade -1` or to a revision such as `alembic downgrade 0005`; downgrades can delete data, see [Migrations](docs/migrations.md) |
+| Create the first superadmin | `python cli.py create-superadmin --email <email>` |
+| All tests | `pytest` (integration tests need `DATABASE_URL` pointing at PostgreSQL) |
+| Tests without a database | `pytest -m "not integration"` |
+| Lint | `ruff check .` |
+| Format check | `black --check .` (use `black .` to format) |
+| Types | `mypy` |
+| All pre-commit hooks | `pre-commit run --all-files` |
+| Real-provider tests (opt-in, cost money) | see [Testing](docs/testing.md) |
+| Kan board helper | `scripts/kan.py`, see "Task tracking (Kan)" in `CLAUDE.md` |
 
-- Existence is hidden: a dataset, experiment or any of its sub-resources
-  (cases, results, evaluations, metrics, export) outside the caller's scope
-  answers `404`, with the same body as an id that does not exist. A list
-  simply omits them. This also covers `start`, `cancel`, `retry-failed`,
-  `evaluate` and adding cases: nothing is changed or enqueued for an
-  out-of-scope experiment.
-- An experiment can only be created from a dataset the caller can see (else
-  `404 Dataset not found`).
-- A `superadmin` has no organization, so cannot create datasets or
-  experiments (`403`); they can read and manage what exists.
-- Legacy data: datasets and experiments that existed before this change were
-  assigned to an organization named `Default` (created if missing) with no
-  owner. Its admins and all superadmins can see them; staff cannot, because
-  nobody owns them.
-- Background workers act on stored ids and are not scoped; scoping applies to
-  the HTTP API.
+Run `python`, `alembic`, `pytest` and the other tools inside the Poetry
+environment (`poetry run ...` or an activated `.venv`). The settings must be
+exported first (`set -a; . ./.env; set +a`); in particular the tests that
+load the settings fail without a valid `JWT_SECRET_KEY`.
 
-### List filters
+## Architecture
 
-`GET /datasets` and `GET /experiments` accept, besides `limit` and `offset`:
+### Layers
 
-| parameter | meaning |
-| --- | --- |
-| `created_from`, `created_to` | inclusive bounds on the creation time; timezone-aware ISO 8601 (a naive value or `created_from` after `created_to` is `422`); encode the `+` of an offset as `%2B` |
-| `status` | experiments only: `pending`, `running`, `completed`, `partially_failed`, `failed` or `cancelled` |
-| `owner_id` | only items owned by that user; useful for `admin` and `superadmin` (for `staff` it can only narrow their own items, and another user's id gives an empty list) |
+Responsibilities are kept apart (details and rules in `CLAUDE.md`):
 
-Filters combine with each other and with the role's scope, and `total`
-reflects the filtered set.
+- **API layer** (`api/`): HTTP endpoints, request validation, authentication
+  and response serialization. `api/v1/endpoints/` holds one module per
+  resource.
+- **Service layer** (`components/<name>/service.py`): business logic and the
+  orchestration of datasets, experiments, evaluations and metrics.
+- **Repository layer** (`components/<name>/repository.py`): persistence and
+  queries, on top of `components/core/repository.py`.
+- **Provider adapters** (`components/third_party/llm/providers/`): the
+  OpenAI and Anthropic calls behind one interface, with normalized
+  responses, token usage, errors and timeouts. `LLMService` selects the
+  adapter; provider-specific behavior stays inside adapters.
+- **Evaluation layer** (`components/evaluation/`): deterministic evaluators,
+  separate from model generation.
+- **Task layer** (`components/*/tasks.py`, `taskiq_app.py`): Taskiq tasks for
+  experiment execution and evaluation.
+- **Admin panel** (`admin/`): optional read-only fastadmin views.
+- **Core** (`components/core/`): settings, database and session handling,
+  `BaseRepository`, access control and the cross-component exceptions, enums,
+  schemas and helpers.
 
-```bash
-B=localhost:8000/api/v1
-TOKEN=$(curl -s -X POST $B/auth/login -H 'Content-Type: application/json' \
-    -d '{"email": "staff@acme.test", "password": "<password>"}' \
-    | python -c 'import sys, json; print(json.load(sys.stdin)["access_token"])')
+### Module layout
 
-# datasets created in 2026 (UTC), then with an explicit offset
-curl -H "Authorization: Bearer $TOKEN" \
-    "$B/datasets?created_from=2026-01-01T00:00:00Z&created_to=2026-12-31T23:59:59Z"
-curl -H "Authorization: Bearer $TOKEN" \
-    "$B/datasets?created_from=2026-01-01T00:00:00%2B02:00"
-
-# failed experiments of one user (as an admin or superadmin)
-curl -H "Authorization: Bearer $TOKEN" \
-    "$B/experiments?status=failed&owner_id=<user_id>&limit=20"
+```
+api/                  FastAPI app, v1 router, endpoints, Depends helpers
+admin/                fastadmin panel, one package per component
+components/
+  core/               config, database, access, repository base, shared
+                      exceptions/enums/schemas/utils
+  <component>/        models, schemas, repository, service, tasks, plus
+                      exceptions, enums, utils, dependencies where needed
+  third_party/llm/    providers/, schemas, service, exceptions, enums
+migrations/           Alembic
+main.py  cli.py  taskiq_app.py  conftest.py
+tests/                tests per component
+docs/                 reference pages
 ```
 
-## Admin panel
+Components are `auth`, `datasets`, `evaluation`, `experiments`, `metrics`,
+`organizations` and `users`.
 
-An optional, browser-based panel for looking at the platform's data, built
-with [fastadmin](https://github.com/vsdudakov/fastadmin) and mounted at
-`/admin`. It is **off unless `ADMIN_SECRET_KEY` is set**; while it is unset,
-`/admin` answers 404 and fastadmin is not even imported.
+### Request flow
 
-### Enable it
+`endpoint -> Depends -> session -> service -> repository`
 
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"   # generate
-```
+The FastAPI dependencies authenticate the caller, open one database session
+for the request (`get_session`, declared with `scope="function"` so the
+commit happens before the response is sent) and build the service through the
+`build_*` factory of its component (`components/<name>/dependencies.py`). The
+service builds its repositories from that session. The whole request is one
+transaction: one commit on success, a rollback on error.
 
-Put the value in `ADMIN_SECRET_KEY` (see `.env.example`) and restart the API.
-It must be at least 32 characters and **must differ from `JWT_SECRET_KEY`**;
-otherwise the API refuses to start. Open `http://localhost:8000/admin/`.
+### Task flow
 
-| setting | default | meaning |
-| --- | --- | --- |
-| `ADMIN_SECRET_KEY` | unset (panel off) | signs panel session cookies; at least 32 characters, different from `JWT_SECRET_KEY` |
-| `ADMIN_SESSION_COOKIE_SECURE` | `true` | marks the session cookie `Secure` |
-| `ADMIN_SESSION_TTL_SECONDS` | `28800` (8 hours, minimum 60) | lifetime of a panel session |
+`Taskiq task -> session_scope -> service`
 
-The session cookie is `HttpOnly` and always `SameSite=Lax` (pinned; the
-environment cannot weaken it). Sign-out only clears the cookie in the browser
-and does **not** revoke the signed session value, which stays valid until the
-TTL ends (unless the user or organization is deactivated). Keep
-`ADMIN_SESSION_TTL_SECONDS` short; rotating `ADMIN_SECRET_KEY` ends all
-sessions at once.
+A task opens its session with `session_scope()` from
+`components/core/database.py` (commit once on success, roll back on error,
+always close) and passes it down in the same way. Side effects that must
+follow durable data, such as publishing to the queue, are registered with
+`on_commit` and run after the commit. Operations with a slow external call do
+not hold a transaction open: `ExperimentRunner` splits each result into three
+short operations (claim; model call with no database access; store the
+outcome and finalize). Business code never calls `session.commit()`; only
+`components/core/database.py` does.
 
-The cookie is `Secure` by default, so over plain HTTP some browsers will not
-store or send it and sign-in appears to do nothing. Set
-`ADMIN_SESSION_COOKIE_SECURE=false` for local HTTP development only; keep
-`true` behind HTTPS.
+### Dependency injection
 
-### Sign in and what you see
+Collaborators other than the database are passed through constructors (other
+services, provider clients, settings values, the `enqueue` function).
+Wiring happens only at the entry points: FastAPI dependencies, Taskiq tasks,
+`cli.py` and the admin classes, through the `build_*` factories. There is no
+DI library, and services never create sessions, settings or other services
+themselves, which keeps them replaceable in tests.
 
-Sign in with the same email and password as the REST API. The same rules
-apply: an inactive user or a user of a blocked organization cannot sign in,
-and a session stops working at once when either becomes inactive. The panel
-shows exactly the data the REST API would, nothing more:
+### Access control and ownership
 
-| role | datasets, experiments, results, evaluations | users | organizations |
-| --- | --- | --- | --- |
-| `staff` | only their own | only themselves | none |
-| `admin` | their whole organization | their organization (no superadmins) | none |
-| `superadmin` | everything | everyone | all |
+Users belong to organizations and have one of three roles: `superadmin`
+(everything, no organization), `admin` (their organization) and `staff` (their
+own data). Datasets and experiments carry an organization and an owner, and
+every query is scoped by the caller's principal; out-of-scope rows answer
+404. Role and active state are read from the database on every request. See
+[Authentication and users](docs/authentication.md) and
+[Access control and ownership](docs/access-control.md).
 
-Out-of-scope rows are not listed, and opening one by id answers 404.
+### How experiments execute
 
-### Read-only, no export
+An experiment stores its configuration (prompt template, targets, evaluator
+settings) and creates one result row per case and target. `start` publishes
+the pending results to RabbitMQ after the data is committed; a worker handles
+each result on its own.
 
-Panel data is **read-only**: adding, editing and deleting are refused (403)
-and so are file uploads, actions and the export buttons. The one exception is
-blocking organizations, below. Export is disabled because fastadmin's export
-builds its columns from all model fields regardless of the hidden-column
-settings and would dump data in bulk. (fastadmin 0.10 does neutralize CSV
-formula cells itself; that is not why it is off.) Use the REST export, which
-is scoped, includes only documented columns and neutralizes formula cells
-(see Export formats). Passwords cannot be changed in the panel.
+- **Claim:** a result is claimed atomically (row lock) and gets a lease
+  (1800 seconds). A result that is already finished or owned is skipped, so
+  duplicate delivery is safe.
+- **Lease:** a result left `running` by a crashed worker becomes reclaimable
+  once its lease expires, and a worker whose lease was reclaimed cannot
+  overwrite the new outcome. Calling `start` again re-enqueues pending and
+  stale results.
+- **Retry:** retryable provider errors (timeout, rate limit, server error)
+  are retried inside the task with capped exponential backoff up to
+  `max_attempts`; `retry-failed` re-runs only the failed results.
+- **Partial failure:** every result is stored independently; the experiment
+  becomes `completed`, `partially_failed` or `failed` when the last result
+  finishes.
 
-### Block or unblock an organization
+Details: [Experiments API](docs/experiments-api.md).
 
-A superadmin opens an organization and flips `is_active` (the only editable
-field; everything else is ignored by the server). The effect is the same as
-a REST deactivation (`PATCH /organizations/<id>` with `is_active`): its users
-cannot sign in or refresh, their refresh tokens are revoked, existing access
-tokens and panel sessions stop working on their next request, and nothing is
-deleted. Setting it back to active lets them sign in again with their
-existing passwords. Admins and staff cannot block organizations.
+### How it scales
 
-### Hidden columns
+- API processes are stateless (no in-process session or job state), so you
+  can run several behind a load balancer.
+- Run as many worker processes as needed; RabbitMQ distributes the tasks.
+  Each worker bounds simultaneous model requests per provider with
+  `LLM_MAX_CONCURRENCY` (default 4); Taskiq's own parallelism is set with
+  worker options such as `--workers` and `--max-async-tasks`.
+- PostgreSQL is the single source of truth. Row locks and leases keep
+  duplicate or concurrent delivery safe, and a lost message is recovered by
+  calling `start` again.
 
-The password hash is never returned (nor the lowercase email copy). A test
-case's `metadata` is not shown. Lists omit bulky text (prompts, responses,
-error messages, configuration, evaluator details, test case input and
-expected output); it appears only on a record's detail view. Treat that
-content as untrusted.
+Known limits:
 
-### Dependency and supply chain
+- Concurrency is per process: there is no global rate limiter across
+  workers, so total in-flight requests are roughly worker processes times
+  `LLM_MAX_CONCURRENCY`.
+- There is no login rate limiting (REST or admin panel); limit
+  `/api/v1/auth/login` and `/admin/api/sign-in` at a proxy if the API is
+  exposed.
+- Swagger UI and ReDoc load assets from a CDN; set `API_DOCS_ENABLED=false`
+  for production exposure.
 
-`fastadmin` is pinned to `~0.10`. It serves a prebuilt frontend bundle that
-is not built or audited in this repository, which is why the panel is opt-in.
-Do not enable it on a deployment where that is not acceptable, and update the
-pin deliberately.
+### Configuration and secrets
 
-### Known limits
+All settings are environment variables read by `components/core/config.py`
+(see `.env.example` for the full list). Secrets (`JWT_SECRET_KEY`,
+`ADMIN_SECRET_KEY`, provider keys, database and broker passwords) come only
+from the environment, are held as secret values and are never logged. Do not
+commit `.env`.
 
-- No sign-in rate limiting or lockout (the same as REST login): limit
-  `/admin/api/sign-in` at a proxy if the API is exposed.
-- Panel sessions are a separate signed cookie, not REST JWTs; a REST logout
-  does not end a panel session. Sign-out in the panel only deletes the cookie
-  in the browser: the signed session value stays valid until it expires
-  (`ADMIN_SESSION_TTL_SECONDS`, 8 hours by default) unless the user or
-  organization is deactivated.
-- Changing `ADMIN_SECRET_KEY` ends every panel session.
-- The user admin validates a session by reading the user without a bound
-  principal, which relies on each request running in its own task context
-  (true for uvicorn). Do not call into the panel from a shared long-lived
-  task; see the docstring of `UserAdmin.get_obj` in `admin/users/admin.py`.
+## Development methodology
 
-## Interactive API documentation
+The workflow is defined in `CLAUDE.md`; this is the short version.
 
-With the API running:
+- **OpenSpec:** meaningful behavior changes go through an OpenSpec change in
+  `openspec/changes/<name>/` with a proposal, design, tasks and spec deltas:
+  propose, apply, then archive. The `openspec-*` skills in `.claude/skills/`
+  drive each step. Documentation-only changes and refactors that do not
+  change behavior use a lighter flow.
+- **Branches:** every feature starts on a new branch from an up-to-date
+  `main` (for example `feat/<change-name>`); never work on `main` or reuse an
+  earlier feature's branch.
+- **Commits:** [Conventional Commits](https://www.conventionalcommits.org/)
+  (the `git-conventional-commits` skill). Commits stay local; nothing is
+  pushed, merged or opened as a pull request unless the owner asks.
+- **Task board:** tasks live on a local Kan board (`scripts/kan.py`).
+  Columns are `Open`, `In-progress`, `Review` and `Done`: move a card to
+  `In-progress` when work starts, to `Review` after the independent review
+  (with a comment following the `kan-review` skill), and to `Done` only after
+  the pull request is merged.
+- **Subagents:** `coder` implements one task, `tester` adds tests and runs
+  the checks, `reviewer` reviews the diff read-only (see
+  [Development agents](docs/development-agents.md)). The main session
+  commits.
+- **Review:** an independent review happens before a pull request, and valid
+  findings are addressed.
+- **Testing policy:** unit tests for domain logic and evaluators, integration
+  tests for persistence and task execution, mocked provider responses for
+  adapter tests, with timeouts, rate limits, malformed responses, retries,
+  duplicate delivery and partial failures covered. Real-provider tests are
+  separate and opt-in. A test run is only reported as passing if it was
+  actually executed. There is exactly one `conftest.py`, at the repository
+  root.
+- **Quality gates:** `pytest`, `ruff check .`, `black --check .`, `mypy` and
+  `pre-commit run --all-files` must pass.
+- **Security:** no secrets in the repository or logs, imported datasets and
+  model outputs are untrusted data, and provider responses are validated.
 
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-- OpenAPI schema: `http://localhost:8000/openapi.json`
+## Documentation
 
-The admin panel is not part of the schema. To call protected endpoints from
-Swagger UI: run `POST /api/v1/auth/login` there (or with curl), copy the
-`access_token` from the response, click **Authorize**, paste the token alone
-(without `Bearer `) and confirm. The token is remembered across page reloads
-(`persistAuthorization`) until you log out of the dialog. Access tokens
-expire (15 minutes by default): log in again or use `POST /auth/refresh`, and
-re-authorize.
+Reference pages (moved out of this file; content unchanged):
 
-Set `API_DOCS_ENABLED=false` to turn all three off (they answer 404); the API
-itself is unaffected. Swagger UI and ReDoc load their JavaScript and CSS from
-a CDN by default (FastAPI's stock behaviour), so opening them contacts a
-third party; set `API_DOCS_ENABLED=false` for production exposure.
-
-## Migrations
-
-```bash
-alembic upgrade head      # apply
-alembic current           # show current revision
-alembic revision --autogenerate -m "message"   # review before applying
-```
-
-Authentication adds revision `0005` (tables `organizations`, `users`,
-`refresh_tokens`): run `alembic upgrade head` before starting the API with
-this change, and create the first superadmin afterwards. Roll back with
-`alembic downgrade 0004` (this deletes users, organizations and sessions).
-
-Resource ownership adds revision `0006` (`organization_id` and `owner_id` on
-`datasets` and `experiments`). Run `alembic upgrade head` before starting the
-API with this change. Existing rows are assigned to the `Default`
-organization with a null owner (see Access control and ownership), so no
-result is lost. `alembic downgrade 0005` drops the ownership columns (the
-`Default` organization stays unless it has no users, see below). If an
-organization named `Default` already exists it is reused, including when it
-is inactive; legacy data is then adopted by an inactive organization and
-needs reactivation. The downgrade removes the `Default` organization only
-if it has no users, even if the operator created it before the upgrade.
-Deploy order: migrate, then restart the API
-and worker; clients must send a token from then on.
-
-Register each component's `models` module in `migrations/env.py` so
-autogenerate sees its tables. The baseline revision `0001` is empty.
-
-## Quality checks
-
-```bash
-pytest                    # integration tests need DATABASE_URL (PostgreSQL)
-pytest -m "not integration"
-ruff check .
-black --check .
-mypy
-pre-commit run --all-files
-```
-
-## Real-provider tests
-
-Tests in `tests/llm/real/` call the real OpenAI and Anthropic APIs, cost
-money, and are skipped by default. To run them:
-
-```bash
-RUN_REAL_PROVIDER_TESTS=1 OPENAI_API_KEY=... ANTHROPIC_API_KEY=... \
-  pytest -m real_provider tests/llm/real
-```
-
-Each test is also skipped if its provider key is unset. Override the models
-with `OPENAI_TEST_MODEL` / `ANTHROPIC_TEST_MODEL`.
-
-## Development agents
-
-Project subagents in `.claude/agents/` support the OpenSpec workflow. Run
-them in this order for each task:
-
-1. `coder` implements one task from the change's `tasks.md`.
-2. `tester` adds tests and runs pytest, Ruff, Black and mypy.
-3. `reviewer` does a read-only review of the diff against the change and
-   `CLAUDE.md`.
-
-The agents do not commit, push or merge; that stays with the main session.
+- [Datasets API](docs/datasets-api.md)
+- [Experiments API](docs/experiments-api.md)
+- [Evaluation API](docs/evaluation-api.md)
+- [Metrics and comparison API](docs/metrics-api.md) (includes the pricing
+  file format and the `docs/pricing.example.json` example)
+- [Authentication and users](docs/authentication.md)
+- [Access control and ownership](docs/access-control.md)
+- [Admin panel](docs/admin-panel.md)
+- [Interactive API documentation](docs/api-documentation.md)
+- [Migrations](docs/migrations.md)
+- [Quality checks and real-provider tests](docs/testing.md)
+- [Development agents](docs/development-agents.md)

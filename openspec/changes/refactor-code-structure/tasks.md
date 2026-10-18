@@ -28,8 +28,8 @@
 
 ## 6. Documentation
 
-- [ ] 6.1 Update the CLAUDE.md project-structure example (add `exceptions.py`, `enums.py`, `utils.py` per component, `components/core/{exceptions,enums,utils,schemas}.py`) and add short conventions for definition locations, dependency injection and the single conftest, and verify the file renders and matches the actual tree
-- [ ] 6.2 Rewrite `README.md` into Summary, Technical Stack, How to start locally, Commands, Architecture and Development methodology, move the existing per-feature reference verbatim into `docs/` pages linked from the README, and verify by running the documented local-start and command steps (compose or podman compose, migrations, API, worker, `cli.py create-superadmin`, tests, lint) and by comparing that every old README section still exists in `docs/`
+- [x] 6.1 Update the CLAUDE.md project-structure example (add `exceptions.py`, `enums.py`, `utils.py` per component, `components/core/{exceptions,enums,utils,schemas}.py`) and add short conventions for definition locations, dependency injection and the single conftest, and verify the file renders and matches the actual tree
+- [x] 6.2 Rewrite `README.md` into Summary, Technical Stack, How to start locally, Commands, Architecture and Development methodology, move the existing per-feature reference verbatim into `docs/` pages linked from the README, and verify by running the documented local-start and command steps (compose or podman compose, migrations, API, worker, `cli.py create-superadmin`, tests, lint) and by comparing that every old README section still exists in `docs/`
 
 ## 7. Final checks
 
