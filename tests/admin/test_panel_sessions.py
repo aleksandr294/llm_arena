@@ -99,7 +99,7 @@ def _concrete(path: str) -> str:
 def test_every_panel_route_needs_a_session_unless_public() -> None:
     routes = _installed_routes()
     registered = set(routes)
-    assert PUBLIC_API | PUBLIC_PAGES <= registered, "stale public entries"
+    assert registered >= PUBLIC_API | PUBLIC_PAGES, "stale public entries"
     assert ("GET", "/api/list/{model}") in registered  # the walk found data
     panel = Panel()
     try:

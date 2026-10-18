@@ -68,7 +68,8 @@ class Panel:
         env.update(extra_env or {})
         if debug_logs:
             env["PANEL_DEBUG_LOGS"] = "1"
-        self._stderr: IO[bytes] = tempfile.TemporaryFile()
+        # Closed in stop(); a context manager cannot span the object lifetime.
+        self._stderr: IO[bytes] = tempfile.TemporaryFile()  # noqa: SIM115
         self._process = subprocess.Popen(
             [sys.executable, "-m", "tests.admin.panel_child"],
             cwd=ROOT,
