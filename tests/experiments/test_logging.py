@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.experiments import get_enqueue, get_llm_service
-from components.core.database import get_session
+from components.core.database import get_session, session_scope
 from components.core.schemas import Principal
 from components.experiments.runner import ExperimentRunner
 from components.third_party.llm.enums import LLMErrorKind, ProviderName
@@ -43,13 +43,8 @@ def _overrides(
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
 ) -> None:
     async def session_override() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except BaseException:
-                await session.rollback()
-                raise
+        async with session_scope(session_factory) as session:
+            yield session
 
     app.dependency_overrides[get_session] = session_override
 

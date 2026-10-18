@@ -11,7 +11,7 @@ import io
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 EXPORT_BATCH_SIZE = 500
 _R = ExperimentResult
 Factory = async_sessionmaker[AsyncSession]
+MetricsServiceFactory = Callable[[AsyncSession], MetricsService]
 
 
 @dataclass(frozen=True)
@@ -76,19 +77,20 @@ async def prepare_export(
     factory: Factory,
     principal: Principal,
     experiment_id: uuid.UUID,
-    pricing_file: str | None,
+    metrics_service: MetricsServiceFactory,
 ) -> ExportContext:
     """Raises ``ExperimentNotFoundError`` for a missing experiment or one
     outside the caller's scope, before anything is streamed. The comparison
     needs the whole experiment, so it is computed once here. Streaming
-    itself runs on the validated context only."""
+    itself runs on the validated context only. ``metrics_service`` builds
+    the metrics collaborator for the session opened here."""
     async with factory() as session:
         experiment = await ExperimentRepository(session).get_scoped(
             experiment_id, principal
         )
         if experiment is None:
             raise ExperimentNotFoundError(experiment_id)
-        comparison = await MetricsService(session, pricing_file).comparison(
+        comparison = await metrics_service(session).comparison(
             principal, experiment_id
         )
         header = {

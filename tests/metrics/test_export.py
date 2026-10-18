@@ -15,7 +15,9 @@ from components.core.enums import Role
 from components.experiments.exceptions import ExperimentNotFoundError
 from components.experiments.models import Experiment
 from components.metrics import export
+from components.metrics.dependencies import build_metrics_service
 from components.metrics.export import csv_stream, json_stream, prepare_export
+from components.metrics.service import MetricsService
 from components.metrics.utils import neutralize
 from tests.access import ROOT, seed_principal
 from tests.metrics.helpers import Row, seed
@@ -23,6 +25,12 @@ from tests.metrics.helpers import Row, seed
 pytestmark = pytest.mark.integration
 
 Factory = async_sessionmaker[AsyncSession]
+
+
+def _metrics(session: AsyncSession) -> MetricsService:
+    return build_metrics_service(session)
+
+
 TRICKY = 'a,b "quoted"\nline2 é中\U0001f600'
 
 
@@ -33,7 +41,7 @@ async def _collect(stream: AsyncIterator[str]) -> list[str]:
 async def _json(
     factory: Factory, experiment_id: uuid.UUID, include: bool = True
 ) -> tuple[dict[str, Any], int]:
-    context = await prepare_export(factory, ROOT, experiment_id, None)
+    context = await prepare_export(factory, ROOT, experiment_id, _metrics)
     chunks = await _collect(json_stream(factory, context, include))
     return json.loads("".join(chunks)), len(chunks)
 
@@ -41,7 +49,7 @@ async def _json(
 async def _csv(
     factory: Factory, experiment_id: uuid.UUID, include: bool = False
 ) -> list[list[str]]:
-    context = await prepare_export(factory, ROOT, experiment_id, None)
+    context = await prepare_export(factory, ROOT, experiment_id, _metrics)
     chunks = await _collect(csv_stream(factory, context, include))
     return list(csv.reader(io.StringIO("".join(chunks), newline="")))
 
@@ -254,14 +262,16 @@ async def test_running_experiment_exports_with_finished_false(
 
 async def test_unknown_experiment_raises(session_factory: Factory) -> None:
     with pytest.raises(ExperimentNotFoundError):
-        await prepare_export(session_factory, ROOT, uuid.uuid4(), None)
+        await prepare_export(session_factory, ROOT, uuid.uuid4(), _metrics)
 
 
 async def test_stream_failure_truncates_without_trailer(
     session_factory: Factory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     experiment_id = await seed(session_factory, [Row(1), Row(2)])
-    context = await prepare_export(session_factory, ROOT, experiment_id, None)
+    context = await prepare_export(
+        session_factory, ROOT, experiment_id, _metrics
+    )
 
     async def boom(*args: object, **kwargs: object) -> Any:
         raise RuntimeError("db gone")
@@ -290,10 +300,10 @@ async def test_prepare_export_hides_out_of_scope_experiments(
     for principal in (colleague, stranger_admin):
         with pytest.raises(ExperimentNotFoundError):
             await prepare_export(
-                session_factory, principal, experiment_id, None
+                session_factory, principal, experiment_id, _metrics
             )
     for principal in (owner, admin, ROOT):
         context = await prepare_export(
-            session_factory, principal, experiment_id, None
+            session_factory, principal, experiment_id, _metrics
         )
         assert context.experiment_id == experiment_id

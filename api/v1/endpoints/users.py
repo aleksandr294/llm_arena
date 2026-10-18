@@ -3,14 +3,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.exceptions import RequestValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.v1.docs import errors
-from api.v1.utils import get_principal, get_settings_dependency
-from components.core.config import SettingsSchema
-from components.core.database import get_session
+from api.v1.utils import SessionDep, get_auth_service, get_principal
+from components.auth.service import AuthService
 from components.core.enums import Role
 from components.core.schemas import Principal
+from components.users.dependencies import build_user_service
 from components.users.exceptions import (
     DuplicateEmailError,
     UserConflictError,
@@ -34,13 +33,13 @@ PrincipalDep = Annotated[Principal, Depends(get_principal)]
 
 
 def get_user_service(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: SessionDep,
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> UserService:
-    return UserService(session)
+    return build_user_service(session, auth_service)
 
 
 ServiceDep = Annotated[UserService, Depends(get_user_service)]
-SettingsDep = Annotated[SettingsSchema, Depends(get_settings_dependency)]
 
 
 def _forbidden() -> HTTPException:
@@ -148,13 +147,11 @@ async def update_user(
     body: UserUpdateSchema,
     principal: PrincipalDep,
     service: ServiceDep,
-    settings: SettingsDep,
 ) -> UserSchema:
     try:
         user = await service.update_user(
             principal,
             user_id,
-            settings,
             body.role,
             body.is_active,
             body.password,

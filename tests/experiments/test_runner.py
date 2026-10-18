@@ -8,11 +8,11 @@ import pytest
 from sqlalchemy import text
 
 from components.experiments import runner as runner_module
+from components.experiments.dependencies import build_experiment_service
 from components.experiments.enums import ExperimentStatus, ResultStatus
 from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.repository import ExperimentResultRepository
 from components.experiments.runner import ExperimentRunner
-from components.experiments.service import ExperimentService
 from components.third_party.llm.enums import LLMErrorKind, ProviderName
 from components.third_party.llm.exceptions import ProviderNotConfiguredError
 from components.third_party.llm.schemas import LLMUsageSchema
@@ -299,7 +299,7 @@ async def test_retry_failed_reruns_only_failed(
         await runner.run(result_id)
     enqueued = Enqueued()
     async with session_factory() as s:
-        service = ExperimentService(s, llm.as_service(), enqueued)
+        service = build_experiment_service(s, llm.as_service(), enqueued)
         assert await service.retry_failed(ROOT, experiment_id) == 1
     assert enqueued.flat == [ids[1]]
     calls_before = len(llm.calls)
@@ -375,7 +375,7 @@ async def test_cancel_with_running_result_finishes_as_cancelled(
     task = asyncio.create_task(runner.run(ids[0]))
     await started.wait()
     async with session_factory() as s:
-        service = ExperimentService(s, llm.as_service(), Enqueued())
+        service = build_experiment_service(s, llm.as_service(), Enqueued())
         experiment = await service.cancel(ROOT, experiment_id)
         await s.commit()
         assert experiment.status == ExperimentStatus.RUNNING

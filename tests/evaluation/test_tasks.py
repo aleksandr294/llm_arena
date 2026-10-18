@@ -14,10 +14,10 @@ from taskiq import InMemoryBroker
 
 from components.evaluation.models import EvaluationResult
 from components.evaluation.service import EvaluationService
+from components.experiments.dependencies import build_experiment_service
 from components.experiments.enums import ExperimentStatus
 from components.experiments.models import Experiment
 from components.experiments.runner import ExperimentRunner
-from components.experiments.service import ExperimentService
 from tests.access import ROOT, seed_principal
 from tests.evaluation.test_repository import Factory
 from tests.experiments.helpers import (
@@ -102,13 +102,13 @@ async def test_started_experiment_ends_with_stored_evaluations(
         }
     )
     async with session_factory() as s:
-        service = ExperimentService(s, llm.as_service(), enqueue)
+        service = build_experiment_service(s, llm.as_service(), enqueue)
         experiment = await service.create(owner, data)
         await s.commit()
         experiment_id = experiment.id
     async with session_factory() as s:
         assert (
-            await ExperimentService(s, llm.as_service(), enqueue).start(
+            await build_experiment_service(s, llm.as_service(), enqueue).start(
                 ROOT, experiment_id
             )
             == 3

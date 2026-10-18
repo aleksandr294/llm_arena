@@ -7,11 +7,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.docs import errors
-from api.v1.utils import get_principal
+from api.v1.utils import SessionDep, get_principal
 from components.core.config import get_settings
-from components.core.database import get_session, get_session_factory
+from components.core.database import get_session_factory
 from components.core.schemas import Principal
 from components.experiments.exceptions import ExperimentNotFoundError
+from components.metrics.dependencies import build_metrics_service
 from components.metrics.enums import ExportFormat
 from components.metrics.export import csv_stream, json_stream, prepare_export
 from components.metrics.schemas import (
@@ -38,10 +39,10 @@ def get_factory() -> async_sessionmaker[AsyncSession]:
 
 
 def get_metrics_service(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: SessionDep,
     pricing_file: Annotated[str | None, Depends(get_pricing_file)],
 ) -> MetricsService:
-    return MetricsService(session, pricing_file)
+    return build_metrics_service(session, pricing_file)
 
 
 ServiceDep = Annotated[MetricsService, Depends(get_metrics_service)]
@@ -125,7 +126,10 @@ async def export_experiment(
     truncates the stream (status 200 is already sent)."""
     try:
         context = await prepare_export(
-            factory, principal, experiment_id, pricing_file
+            factory,
+            principal,
+            experiment_id,
+            lambda session: build_metrics_service(session, pricing_file),
         )
     except ExperimentNotFoundError:
         raise _not_found() from None

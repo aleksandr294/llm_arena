@@ -12,7 +12,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.experiments import get_enqueue, get_llm_service
-from components.core.database import get_session
+from components.core.database import get_session, session_scope
 from components.core.schemas import Principal
 from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.runner import ExperimentRunner
@@ -60,14 +60,8 @@ def _overrides(
     enqueued: Enqueued,
 ) -> None:
     async def session_override() -> AsyncIterator[AsyncSession]:
-        # Same unit-of-work semantics as get_session.
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except BaseException:
-                await session.rollback()
-                raise
+        async with session_scope(session_factory) as session:
+            yield session
 
     app.dependency_overrides[get_session] = session_override
     app.dependency_overrides[get_llm_service] = llm.as_service

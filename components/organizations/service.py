@@ -1,4 +1,4 @@
-"""Organization use cases. Owns the transaction of each operation."""
+"""Organization use cases. Uses the caller's session and never commits."""
 
 import uuid
 from collections.abc import Sequence
@@ -26,7 +26,6 @@ class OrganizationService:
             raise DuplicateOrganizationNameError
         try:
             organization = await self.organizations.create(name)
-            await self.session.commit()
         except IntegrityError:
             await self.session.rollback()
             raise DuplicateOrganizationNameError from None
@@ -64,7 +63,6 @@ class OrganizationService:
                     await self.tokens.revoke_all_for_organization(
                         organization.id
                     )
-            await self.session.commit()
         except IntegrityError:
             await self.session.rollback()
             raise DuplicateOrganizationNameError from None

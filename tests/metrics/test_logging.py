@@ -11,7 +11,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.metrics import get_factory, get_pricing_file
-from components.core.database import get_session
+from components.core.database import get_session, session_scope
 from components.core.schemas import Principal
 from components.datasets.models import TestCase
 from components.experiments.models import ExperimentResult
@@ -30,7 +30,7 @@ HOSTILE = f'=HYPERLINK("x")\n",\x01 {RESPONSE} {{"a": [ {EXPECTED}'
 @pytest.fixture(autouse=True)
 def _overrides(app: FastAPI, session_factory: Factory) -> None:
     async def session_override() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
+        async with session_scope(session_factory) as session:
             yield session
 
     app.dependency_overrides[get_session] = session_override

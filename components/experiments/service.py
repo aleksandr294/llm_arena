@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.core.access import require_organization
+from components.core.database import commit, on_commit
 from components.core.schemas import Principal
 from components.datasets.exceptions import DatasetNotFoundError
 from components.datasets.repository import (
@@ -50,10 +51,12 @@ _RETRYABLE_STATUSES = {
 
 
 class ExperimentService:
-    """API-side orchestration. Uses the caller's session; it commits only in
-    ``start`` and ``retry_failed``, where the state change must be durable
-    before tasks are enqueued (a worker must never see an uncommitted
-    experiment, and a rolled-back request must not leave orphan tasks)."""
+    """API-side orchestration. Uses the caller's session; the entry point
+    owns the transaction. ``start`` and ``retry_failed`` are the explicit
+    commit points: the state change must be durable before tasks are
+    enqueued (a worker must never see an uncommitted experiment, and a
+    rolled-back request must not leave orphan tasks), so they register the
+    enqueue with ``on_commit`` and commit."""
 
     def __init__(
         self,
@@ -214,9 +217,16 @@ class ExperimentService:
         return await self._commit_and_enqueue(ids)
 
     async def _commit_and_enqueue(self, ids: Sequence[uuid.UUID]) -> int:
-        await self.session.commit()
         if ids:
-            await self.enqueue(ids)
+
+            async def publish() -> None:
+                await self.enqueue(ids)
+
+            on_commit(self.session, publish)
+        # The single commit of the operation; the enqueue runs right after
+        # it, so a failed enqueue leaves committed pending results that a
+        # repeated start enqueues again.
+        await commit(self.session)
         return len(ids)
 
     async def get(

@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 
 from components.auth import security
 from components.auth import service as service_module
+from components.auth.dependencies import build_auth_service
 from components.auth.enums import RejectionReason
 from components.auth.exceptions import (
     InvalidCredentialsError,
@@ -22,8 +23,9 @@ from components.auth.security import (
     create_refresh_token,
     hash_token_id,
 )
-from components.auth.service import AuthService, TokenPair, ValidationResult
+from components.auth.service import TokenPair, ValidationResult
 from components.core.config import SettingsSchema
+from components.core.database import session_scope
 from components.core.enums import Role
 from components.organizations.models import Organization
 from components.users.models import User
@@ -41,25 +43,28 @@ class Api:
         self.settings = settings
 
     async def login(self, email: str, password: str = PASSWORD) -> TokenPair:
-        async with self.factory() as s:
-            return await AuthService(s, self.settings).login(email, password)
+        async with session_scope(self.factory) as s:
+            return await build_auth_service(s, self.settings).login(
+                email, password
+            )
 
     async def refresh(self, token: str) -> TokenPair:
-        async with self.factory() as s:
-            return await AuthService(s, self.settings).refresh(token)
+        async with session_scope(self.factory) as s:
+            return await build_auth_service(s, self.settings).refresh(token)
 
     async def logout(self, token: str) -> None:
-        async with self.factory() as s:
-            await AuthService(s, self.settings).logout(token)
+        async with session_scope(self.factory) as s:
+            await build_auth_service(s, self.settings).logout(token)
 
     async def validate(self, token: str) -> ValidationResult:
-        async with self.factory() as s:
-            return await AuthService(s, self.settings).validate(token)
+        async with session_scope(self.factory) as s:
+            return await build_auth_service(s, self.settings).validate(token)
 
     async def revoke_all(self, user_id: uuid.UUID) -> None:
-        async with self.factory() as s:
-            await AuthService(s, self.settings).revoke_all_sessions(user_id)
-            await s.commit()
+        async with session_scope(self.factory) as s:
+            await build_auth_service(s, self.settings).revoke_all_sessions(
+                user_id
+            )
 
 
 @pytest.fixture

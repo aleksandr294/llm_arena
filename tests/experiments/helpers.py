@@ -9,11 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
+from components.experiments.dependencies import build_experiment_service
 from components.experiments.schemas import (
     ExperimentConfigSchema,
     ExperimentCreateSchema,
 )
-from components.experiments.service import ExperimentService
 from components.third_party.llm.enums import LLMErrorKind, ProviderName
 from components.third_party.llm.exceptions import (
     LLMProviderError,
@@ -183,7 +183,9 @@ async def make_experiment(
     dataset_id = await make_dataset(factory, cases, owner)
     enqueue = enqueued or Enqueued()
     async with factory() as session:
-        service = ExperimentService(session, FakeLLM().as_service(), enqueue)
+        service = build_experiment_service(
+            session, FakeLLM().as_service(), enqueue
+        )
         experiment = await service.create(
             owner, create_data(dataset_id, models, max_attempts)
         )
@@ -191,7 +193,7 @@ async def make_experiment(
         experiment_id = experiment.id
     if start:
         async with factory() as session:
-            service = ExperimentService(
+            service = build_experiment_service(
                 session, FakeLLM().as_service(), enqueue
             )
             await service.start(ROOT, experiment_id)

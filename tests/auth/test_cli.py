@@ -22,7 +22,8 @@ from typer.testing import CliRunner, Result
 import cli
 import main
 from api.app import create_app
-from components.auth.service import AuthService
+from components.auth.dependencies import build_auth_service
+from components.core import database
 from components.core.config import SettingsSchema
 from components.core.database import Base
 from components.core.enums import Role
@@ -58,7 +59,7 @@ def _db(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     _run_ddl(create=True)
     # NullPool: connections never outlive the loop of one asyncio.run call.
     factory = async_sessionmaker(_engine(), expire_on_commit=False)
-    monkeypatch.setattr(cli, "get_session_factory", lambda: factory)
+    monkeypatch.setattr(database, "get_session_factory", lambda: factory)
     monkeypatch.delenv(cli.PASSWORD_ENV, raising=False)
     yield
     _run_ddl(create=False)
@@ -85,7 +86,7 @@ def _login(email: str, password: str) -> bool:
         engine = _engine()
         try:
             async with async_sessionmaker(engine)() as s:
-                await AuthService(s, settings).login(email, password)
+                await build_auth_service(s, settings).login(email, password)
             return True
         except Exception:
             return False

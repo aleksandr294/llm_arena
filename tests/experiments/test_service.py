@@ -10,6 +10,7 @@ from components.core.enums import Role
 from components.core.exceptions import OrganizationRequiredError
 from components.datasets.exceptions import DatasetNotFoundError
 from components.datasets.models import TestCase
+from components.experiments.dependencies import build_experiment_service
 from components.experiments.enums import ExperimentStatus, ResultStatus
 from components.experiments.exceptions import (
     ExperimentNotFoundError,
@@ -38,7 +39,7 @@ def _service(
     enqueued: Enqueued | None = None,
     llm: FakeLLM | None = None,
 ) -> ExperimentService:
-    return ExperimentService(
+    return build_experiment_service(
         session, (llm or FakeLLM()).as_service(), enqueued or Enqueued()
     )
 
@@ -202,7 +203,7 @@ async def test_start_enqueue_failure_keeps_results_pending(
         raise ConnectionError("broker down")
 
     async with session_factory() as s:
-        service = ExperimentService(s, FakeLLM().as_service(), boom)
+        service = build_experiment_service(s, FakeLLM().as_service(), boom)
         with pytest.raises(ConnectionError):
             await service.start(ROOT, experiment_id)
     async with session_factory() as s:

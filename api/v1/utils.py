@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from components.auth.dependencies import build_auth_service
 from components.auth.exceptions import AccessTokenRejectedError
 from components.auth.service import AuthService
 from components.core.config import SettingsSchema, get_settings
@@ -19,16 +20,24 @@ from components.core.schemas import Principal
 _bearer = HTTPBearer(auto_error=False)
 
 
+# ``scope="function"``: the session dependency finishes (commit, or rollback
+# on error) when the endpoint function returns, before the response is sent.
+# With the default scope the teardown runs after the response, so a failed
+# commit would be invisible to the client. Every endpoint and sub-dependency
+# that takes the session uses this alias.
+SessionDep = Annotated[AsyncSession, Depends(get_session, scope="function")]
+
+
 def get_settings_dependency() -> SettingsSchema:
     """Overridable in tests."""
     return get_settings()
 
 
 def get_auth_service(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: SessionDep,
     settings: Annotated[SettingsSchema, Depends(get_settings_dependency)],
 ) -> AuthService:
-    return AuthService(session, settings)
+    return build_auth_service(session, settings)
 
 
 def unauthorized(detail: str = "Not authenticated") -> HTTPException:

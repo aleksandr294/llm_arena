@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.v1.utils import get_settings_dependency
 from components.core.config import SettingsSchema
-from components.core.database import get_session
+from components.core.database import get_session, session_scope
 from conftest import TEST_JWT_SECRET
 from tests.access import Actors, seed_actors
 
@@ -22,14 +22,8 @@ async def actors(
     organizations, users and refresh tokens tables."""
 
     async def session_override() -> AsyncIterator[AsyncSession]:
-        # Same unit-of-work semantics as get_session.
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except BaseException:
-                await session.rollback()
-                raise
+        async with session_scope(session_factory) as session:
+            yield session
 
     app.dependency_overrides[get_session] = session_override
     app.dependency_overrides[get_settings_dependency] = lambda: SettingsSchema(

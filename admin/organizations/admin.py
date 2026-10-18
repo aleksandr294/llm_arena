@@ -7,11 +7,11 @@ from typing import Any
 from fastadmin import AdminApiException, register
 
 from admin.core import ReadOnlyScopedAdmin, principal_of
-from components.core.database import get_session_factory
+from components.core.database import session_scope
 from components.core.enums import Role
+from components.organizations.dependencies import build_organization_service
 from components.organizations.exceptions import OrganizationNotFoundError
 from components.organizations.models import Organization
-from components.organizations.service import OrganizationService
 
 
 @register(Organization)
@@ -51,13 +51,15 @@ class OrganizationAdmin(ReadOnlyScopedAdmin):
         # The scoped read is the visibility check (superadmins see all).
         if await self.orm_get_obj(organization_id) is None:
             return None
-        async with get_session_factory()() as session:
-            try:
-                await OrganizationService(session).update(
+        try:
+            # The scope commits on exit, before the read below uses another
+            # session.
+            async with session_scope() as session:
+                await build_organization_service(session).update(
                     organization_id, is_active=is_active
                 )
-            except OrganizationNotFoundError:
-                return None
+        except OrganizationNotFoundError:
+            return None
         result: dict[str, Any] | None = await self.orm_serialize_obj_by_id(
             organization_id
         )

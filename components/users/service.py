@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from components.auth.exceptions import PasswordPolicyError
 from components.auth.security import hash_password, validate_password_policy
 from components.auth.service import AuthService
-from components.core.config import SettingsSchema
 from components.core.enums import Role
 from components.core.schemas import Principal
 from components.organizations.repository import OrganizationRepository
@@ -27,11 +26,17 @@ from components.users.utils import normalize_email
 
 
 class UserService:
-    """Owns the transaction of each operation (commits on success)."""
+    """Uses the caller's session and never commits; the entry point owns the
+    transaction. ``auth_service`` ends a user's sessions on deactivation or
+    a password change."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, auth_service: AuthService
+    ) -> None:
         self.session = session
+        self.auth = auth_service
         self.users = UserRepository(session)
+        self.organizations = OrganizationRepository(session)
 
     async def create_superadmin(self, email: str, password: str) -> User:
         """Raises ``InvalidEmailError``, ``PasswordPolicyError`` or
@@ -45,7 +50,6 @@ class UserService:
             user = await self.users.create(
                 email, password_hash, Role.SUPERADMIN, None
             )
-            await self.session.commit()
         except IntegrityError:
             # Lost a race against a concurrent insert of the same email.
             await self.session.rollback()
@@ -84,9 +88,9 @@ class UserService:
             )
         email = self._email(email)
         self._password(password)
-        if organization_id is None or not await OrganizationRepository(
-            self.session
-        ).exists(organization_id):
+        if organization_id is None or not await self.organizations.exists(
+            organization_id
+        ):
             raise UserInputError("organization_id", "organization not found")
         if await self.users.get_by_email(email) is not None:
             raise DuplicateEmailError
@@ -95,7 +99,6 @@ class UserService:
             user = await self.users.create(
                 email, password_hash, role, organization_id
             )
-            await self.session.commit()
         except IntegrityError:
             await self.session.rollback()
             raise DuplicateEmailError from None
@@ -131,7 +134,6 @@ class UserService:
         self,
         caller: Principal,
         user_id: uuid.UUID,
-        settings: SettingsSchema,
         role: Role | None = None,
         is_active: bool | None = None,
         password: str | None = None,
@@ -157,10 +159,7 @@ class UserService:
         if is_active is not None:
             user.is_active = is_active
         if password is not None or is_active is False:
-            await AuthService(self.session, settings).revoke_all_sessions(
-                user.id
-            )
-        await self.session.commit()
+            await self.auth.revoke_all_sessions(user.id)
         return user
 
     @staticmethod
