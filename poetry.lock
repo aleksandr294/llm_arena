@@ -399,6 +399,21 @@ cffi = [
 ]
 
 [[package]]
+name = "asgiref"
+version = "3.12.1"
+description = "ASGI specs, helper code, and adapters"
+optional = false
+python-versions = ">=3.10"
+files = [
+    {file = "asgiref-3.12.1-py3-none-any.whl", hash = "sha256:fe386d1c2bff7259ea95929266d12a8cf9a8b5a1c2598402967d8792e7a7c094"},
+    {file = "asgiref-3.12.1.tar.gz", hash = "sha256:59dcb51c272ad209d59bed5708a64a333083e86017d7fcdd67498eeab7784340"},
+]
+
+[package.extras]
+mypy = ["mypy (>=1.14.0)"]
+tests = ["pytest", "pytest-asyncio"]
+
+[[package]]
 name = "ast-serialize"
 version = "0.13.0"
 description = "Python bindings for mypy AST serialization"
@@ -801,6 +816,34 @@ files = [
 dev = ["pre-commit (>=2.16.0)", "pydoctor (>=25.4.0)", "pytest"]
 docs = ["pydoctor (>=25.4.0)"]
 test = ["pytest"]
+
+[[package]]
+name = "fastadmin"
+version = "0.10.0"
+description = "FastAdmin is an easy-to-use Admin Dashboard App for FastAPI/Flask/Django inspired by Django Admin."
+optional = false
+python-versions = ">=3.12"
+files = [
+    {file = "fastadmin-0.10.0-py3-none-any.whl", hash = "sha256:03b91e6554feea3d4e504406438182d6297a2da6d181243e9eb78b4614099f08"},
+    {file = "fastadmin-0.10.0.tar.gz", hash = "sha256:4c46091c1d0eb94e4a48be361ebc2cd3fe1bc99222b9138fc506dbae0bedc922"},
+]
+
+[package.dependencies]
+asgiref = ">=3.11"
+fastapi = {version = ">=0.100,<1", optional = true, markers = "extra == \"fastapi\""}
+greenlet = {version = ">=3", optional = true, markers = "extra == \"sqlalchemy\""}
+pyjwt = ">=2.6"
+python-multipart = {version = ">=0.0.5,<1", optional = true, markers = "extra == \"fastapi\""}
+sqlalchemy = {version = ">=2,<3", extras = ["asyncio"], optional = true, markers = "extra == \"sqlalchemy\""}
+
+[package.extras]
+django = ["django (>=6,<7)"]
+fastapi = ["fastapi (>=0.100,<1)", "python-multipart (>=0.0.5,<1)"]
+flask = ["flask (>=3,<4)"]
+pony = ["pony (>=0.7,<1)"]
+sqlalchemy = ["greenlet (>=3)", "sqlalchemy[asyncio] (>=2,<3)"]
+tortoise-orm = ["tortoise-orm (>=1,<2)"]
+yara-orm = ["yara-orm (>=1,<2)"]
 
 [[package]]
 name = "fastapi"
@@ -2577,6 +2620,17 @@ files = [
 cli = ["click (>=5.0)"]
 
 [[package]]
+name = "python-multipart"
+version = "0.0.32"
+description = "A streaming multipart parser for Python"
+optional = false
+python-versions = ">=3.10"
+files = [
+    {file = "python_multipart-0.0.32-py3-none-any.whl", hash = "sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23"},
+    {file = "python_multipart-0.0.32.tar.gz", hash = "sha256:be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e"},
+]
+
+[[package]]
 name = "pytokens"
 version = "0.4.1"
 description = "A Fast, spec compliant Python 3.14+ tokenizer that runs on older Pythons."
@@ -3209,4 +3263,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.12,<4.0"
-content-hash = "081b5ce568332ad2ace1733de23763fcae17528a43a19a3b9f91ac14b2454794"
+content-hash = "04708f7752bfd8161f2ae8a722fe927bb356e30bef260e3607459890a7dc9f12"

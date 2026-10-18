@@ -21,6 +21,7 @@ anthropic = "^1.15.0"
 pyjwt = "^2.15.1"
 argon2-cffi = "^25.1.0"
 typer = "^0.27.3"
+fastadmin = {version = "~0.10", extras = ["fastapi", "sqlalchemy"]}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
@@ -51,8 +52,13 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["api", "components", "tests"]
+files = ["admin", "api", "components", "tests"]
 explicit_package_bases = true
+
+# fastadmin ships no type information.
+[[tool.mypy.overrides]]
+module = ["fastadmin", "fastadmin.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
