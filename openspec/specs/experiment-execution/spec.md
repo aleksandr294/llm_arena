@@ -7,7 +7,7 @@ Defines how an experiment runs one dataset against several models reliably and r
 ## Requirements
 
 ### Requirement: Create an experiment
-The system SHALL create an experiment from an existing dataset, 1 to 10 distinct provider/model targets, a prompt template, generation parameters and an evaluator configuration. The response SHALL be 201 with status pending, and no model request SHALL be made.
+The system SHALL create an experiment owned by the authenticated user from a dataset visible to that user, 1 to 10 distinct provider/model targets, a prompt template, generation parameters and an evaluator configuration. The response SHALL be 201 with status pending, and no model request SHALL be made.
 
 #### Scenario: Experiment created
 - **WHEN** a client creates an experiment for a dataset with 3 cases and 2 models
@@ -16,6 +16,10 @@ The system SHALL create an experiment from an existing dataset, 1 to 10 distinct
 #### Scenario: Unknown dataset
 - **WHEN** a client creates an experiment for a dataset that does not exist
 - **THEN** the response is 404 and nothing is stored
+
+#### Scenario: Owner recorded
+- **WHEN** a staff user creates an experiment for their dataset
+- **THEN** the experiment's owner is that user and its organization is the dataset's organization
 
 ### Requirement: Experiment input validation
 The system SHALL reject, with 422 naming the invalid field, an empty dataset, an empty or duplicate target list, more than 10 targets, a provider whose API key is not configured, a template without the `{input}` placeholder, generation parameters outside the provider request limits, max attempts outside 1 to 5, and an evaluator configuration that is not a valid deterministic-evaluation configuration.
@@ -155,3 +159,18 @@ The system SHALL store only the error kind and a sanitized message in a failed r
 #### Scenario: Provider error text
 - **WHEN** a provider error message contains prompt text
 - **THEN** the stored error message and the logs do not contain it
+
+### Requirement: List experiments
+The system SHALL list the experiments visible to the caller, oldest first, with pagination (limit 1 to 100, default 50, offset 0 or more), a total, and optional filters by status and by creation time (`created_from` and `created_to`, both inclusive), and for admins and superadmins by owner.
+
+#### Scenario: Status filter
+- **WHEN** a client filters experiments by status completed
+- **THEN** only visible completed experiments are returned and the total reflects the filter
+
+#### Scenario: Date and status combined
+- **WHEN** a client filters by a creation time range and a status
+- **THEN** only experiments matching both are returned
+
+#### Scenario: Invalid status
+- **WHEN** a client filters by an unknown status
+- **THEN** the response is 422
