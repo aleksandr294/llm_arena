@@ -27,6 +27,7 @@ class Row:
     evals: dict[str, str] = field(default_factory=dict)
     text: str | None = None
     attempts: int = 1
+    truncated: bool = False
 
 
 def targets(*models: str) -> list[dict[str, str]]:
@@ -88,6 +89,7 @@ async def seed(
                 rendered_prompt=f"SECRET-PROMPT-{row.position}",
                 attempts=row.attempts,
                 response_text=row.text,
+                response_truncated=row.truncated,
                 input_tokens=row.tokens[0],
                 output_tokens=row.tokens[1],
                 total_tokens=row.tokens[2],

@@ -179,6 +179,7 @@ async def test_csv_export_parses_back(
         "output_tokens",
         "total_tokens",
         "error_kind",
+        "response_truncated",
         "eval:ex",
         "eval:has",
         "response_text",
@@ -188,9 +189,10 @@ async def test_csv_export_parses_back(
     assert first[:5] == ["1", "openai", "m1", "succeeded", "1"]
     assert first[5:9] == ["1.5", "1", "2", "3"]
     assert first[9] == ""
-    assert first[10:12] == ["passed", "failed"]
-    assert first[12] == TRICKY
-    assert all(len(r) == 13 for r in table)
+    assert first[10] == "false"
+    assert first[11:13] == ["passed", "failed"]
+    assert first[13] == TRICKY
+    assert all(len(r) == 14 for r in table)
 
 
 async def test_csv_unknowns_are_empty_and_responses_optional(
@@ -214,6 +216,7 @@ async def test_csv_unknowns_are_empty_and_responses_optional(
         "",
         "",
         "timeout",
+        "false",
         "",
     ]
 
@@ -293,7 +296,7 @@ async def test_stream_failure_truncates_without_trailer(
     chunks = await _collect(json_stream(_scope(session_factory), context, True))
     text = "".join(chunks)
     assert not text.endswith("]}")
-    with pytest.raises(ValueError):
+    with pytest.raises(json.JSONDecodeError):
         json.loads(text)
 
 
@@ -319,3 +322,21 @@ async def test_prepare_export_hides_out_of_scope_experiments(
             _scope(session_factory), principal, experiment_id, _metrics
         )
         assert context.experiment_id == experiment_id
+
+
+async def test_truncation_flag_in_json_and_csv_with_and_without_text(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await seed(
+        session_factory,
+        [Row(1, text="cut", truncated=True), Row(2, text="whole")],
+    )
+    for include in (True, False):
+        doc, _ = await _json(session_factory, experiment_id, include)
+        assert [r["response_truncated"] for r in doc["results"]] == [
+            True,
+            False,
+        ]
+        table = await _csv(session_factory, experiment_id, include)
+        column = table[0].index("response_truncated")
+        assert [r[column] for r in table[1:]] == ["true", "false"]

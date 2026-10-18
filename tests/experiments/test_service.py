@@ -526,3 +526,21 @@ async def test_start_calls_the_injected_enqueue_once_after_commit(
     assert len(batches) == 1
     assert sorted(batches[0]) == sorted(pending)
     assert seen == ["running"]
+
+
+async def test_oversized_rendered_prompt_is_rejected_and_nothing_stored(
+    session_factory: Factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "components.experiments.service.MAX_RENDERED_PROMPT_CHARS", 5
+    )
+    owner = await seed_principal(session_factory)
+    dataset_id = await make_dataset(session_factory, cases=2, owner=owner)
+    async with session_factory() as s:
+        with pytest.raises(ExperimentValidationError) as exc:
+            await _service(s).create(owner, create_data(dataset_id))
+        assert exc.value.field == "prompt_template"
+        await s.rollback()
+    async with session_factory() as s:
+        assert (await s.scalars(select(Experiment))).all() == []
+        assert (await s.scalars(select(ExperimentResult))).all() == []

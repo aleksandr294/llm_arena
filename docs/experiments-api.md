@@ -82,6 +82,31 @@ most 10 000 results (cases times targets) per experiment, `max_attempts`
   `error_message` are stored; provider error text, prompts and API keys are
   never logged or stored in error fields.
 
+### Bounded rendered prompts
+
+A template may repeat `{input}` many times, so the rendered prompt can be far
+larger than any single field. Creating an experiment is rejected with `422`
+(field `prompt_template`, nothing stored) when any one rendered prompt would
+exceed 200000 characters, or all rendered prompts together would exceed
+100000000 characters. The sizes are computed from the template and the case
+texts before any prompt is built, so a hostile request cannot exhaust memory.
+These limits are constants (`MAX_RENDERED_PROMPT_CHARS`,
+`MAX_TOTAL_RENDERED_CHARS` in `components/experiments/utils.py`), not
+settings: they protect the service itself and a template with maximal
+`{input}` and `{expected_output}` fields still fits.
+
+### Bounded stored output
+
+`MAX_STORED_RESPONSE_CHARS` (default 1000000) bounds the stored
+`response_text` per result, counted in characters. A longer response is cut so
+that the stored text, including the visible marker `\n[... response
+truncated ...]` at its end, is exactly that many characters, and the result
+reports `response_truncated: true` (also in the JSON and CSV exports). A
+response within the limit is stored unchanged with `response_truncated:
+false`. Results stored before this setting existed read `false`. The original
+length is logged, never the text. Evaluators and metrics see the stored
+(truncated) text.
+
 ### Worker concurrency
 
 `LLM_MAX_CONCURRENCY` (default 4) bounds simultaneous model requests per

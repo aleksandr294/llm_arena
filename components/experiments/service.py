@@ -8,6 +8,7 @@ from components.core.access import require_organization
 from components.core.database import commit, on_commit
 from components.core.schemas import Principal
 from components.datasets.exceptions import DatasetNotFoundError
+from components.datasets.models import TestCase
 from components.datasets.repository import (
     DatasetRepository,
     TestCaseRepository,
@@ -25,7 +26,12 @@ from components.experiments.repository import (
     finalize_experiment,
 )
 from components.experiments.schemas import ExperimentCreateSchema
-from components.experiments.utils import render_prompt
+from components.experiments.utils import (
+    MAX_RENDERED_PROMPT_CHARS,
+    MAX_TOTAL_RENDERED_CHARS,
+    render_prompt,
+    rendered_length,
+)
 from components.third_party.llm.exceptions import (
     ProviderNotConfiguredError,
     UnsupportedProviderError,
@@ -84,6 +90,29 @@ class ExperimentService:
                     "config.targets", str(exc)
                 ) from exc
 
+    @staticmethod
+    def _check_rendered_sizes(
+        template: str, cases: Sequence[TestCase], target_count: int
+    ) -> None:
+        """Reject before rendering anything when a prompt, or all of them
+        together, would be too large to store."""
+        total = 0
+        for case in cases:
+            size = rendered_length(template, case.input, case.expected_output)
+            if size > MAX_RENDERED_PROMPT_CHARS:
+                raise ExperimentValidationError(
+                    "prompt_template",
+                    f"rendered prompt would exceed {MAX_RENDERED_PROMPT_CHARS} "
+                    f"characters (case at position {case.position})",
+                )
+            total += size * target_count
+        if total > MAX_TOTAL_RENDERED_CHARS:
+            raise ExperimentValidationError(
+                "prompt_template",
+                "rendered prompts would exceed "
+                f"{MAX_TOTAL_RENDERED_CHARS} characters in total",
+            )
+
     async def create(
         self, principal: Principal, data: ExperimentCreateSchema
     ) -> Experiment:
@@ -110,6 +139,7 @@ class ExperimentService:
                 f"experiment would create more than {MAX_RESULTS} results",
             )
         cases, _ = await self.cases.list_page(data.dataset_id, case_count, 0)
+        self._check_rendered_sizes(data.prompt_template, cases, len(targets))
         experiment = Experiment(
             name=data.name,
             dataset_id=data.dataset_id,

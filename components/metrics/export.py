@@ -49,6 +49,7 @@ class ExportRow:
     output_tokens: int | None
     total_tokens: int | None
     error_kind: str | None
+    response_truncated: bool
     evaluations: dict[str, str]
     rendered_prompt: str | None
     response_text: str | None
@@ -165,6 +166,7 @@ async def _read_batch(
             _R.output_tokens,
             _R.total_tokens,
             _R.error_kind,
+            _R.response_truncated,
             prompt,
             response,
         )
@@ -202,9 +204,10 @@ async def _read_batch(
             output_tokens=r[8],
             total_tokens=r[9],
             error_kind=r[10],
+            response_truncated=r[11],
             evaluations=evaluations.get(r[0], {}),
-            rendered_prompt=r[11],
-            response_text=r[12],
+            rendered_prompt=r[12],
+            response_text=r[13],
         )
         for r in rows
     ]
@@ -224,6 +227,7 @@ def _json_row(row: ExportRow, include_text: bool) -> dict[str, Any]:
         "output_tokens": row.output_tokens,
         "total_tokens": row.total_tokens,
         "error_kind": row.error_kind,
+        "response_truncated": row.response_truncated,
         "evaluations": [
             {"evaluator_id": k, "status": v}
             for k, v in sorted(row.evaluations.items())
@@ -281,6 +285,7 @@ def csv_columns(context: ExportContext, include_responses: bool) -> list[str]:
         "output_tokens",
         "total_tokens",
         "error_kind",
+        "response_truncated",
         *(f"eval:{e}" for e in context.evaluator_ids),
     ]
     if include_responses:
@@ -306,6 +311,7 @@ def _csv_row(
         _cell(row.output_tokens),
         _cell(row.total_tokens),
         neutralize(_cell(row.error_kind)),
+        "true" if row.response_truncated else "false",
         *(neutralize(_cell(row.evaluations.get(e))) for e in evaluator_ids),
     ]
     if include_responses:

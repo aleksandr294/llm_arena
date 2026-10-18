@@ -2,7 +2,6 @@
 (``DATABASE_URL``) and permission to create databases."""
 
 import asyncio
-import os
 import uuid
 from collections.abc import Iterator
 from typing import Any
@@ -14,6 +13,7 @@ from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from components.core import config as app_config
+from tests.helpers import checked_database_url
 
 pytestmark = pytest.mark.integration
 
@@ -34,7 +34,7 @@ def _run(url: str, sql: str, **params: Any) -> list[Any]:
 def _admin(sql: str) -> None:
     async def go() -> None:
         engine = create_async_engine(
-            os.environ["DATABASE_URL"], isolation_level="AUTOCOMMIT"
+            checked_database_url(), isolation_level="AUTOCOMMIT"
         )
         try:
             async with engine.connect() as conn:
@@ -50,7 +50,7 @@ def scratch_url(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     name = f"mig_{uuid.uuid4().hex[:12]}"
     _admin(f'CREATE DATABASE "{name}"')
     url = (
-        make_url(os.environ["DATABASE_URL"])
+        make_url(checked_database_url())
         .set(database=name)
         .render_as_string(hide_password=False)
     )
@@ -73,9 +73,9 @@ def _drift(url: str) -> list[Any]:
     from alembic.autogenerate import compare_metadata
     from alembic.migration import MigrationContext
 
-    import components.auth.models  # noqa: F401
-    import components.datasets.models  # noqa: F401
-    import components.evaluation.models  # noqa: F401
+    import components.auth.models
+    import components.datasets.models
+    import components.evaluation.models
     import components.experiments.models  # noqa: F401
     from components.core.database import Base
 
@@ -168,8 +168,8 @@ def test_upgrade_assigns_default_organization_and_downgrades(
         ("experiments", "owner_id"): "YES",
     }
 
-    assert _drift(scratch_url) == []  # models and migrations agree
-
+    # No drift check here: the models describe the head revision, which is
+    # later than 0006. test_0007 asserts models and migrations agree at head.
     command.downgrade(_config(), "0005")
     cols = _run(
         scratch_url,

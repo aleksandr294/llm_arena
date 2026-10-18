@@ -33,6 +33,7 @@ def get_runner() -> ExperimentRunner:
         session_scope,
         LLMService(settings),
         settings.llm_max_concurrency,
+        max_response_chars=settings.max_stored_response_chars,
         on_succeeded=_enqueue_evaluation,
     )
 
