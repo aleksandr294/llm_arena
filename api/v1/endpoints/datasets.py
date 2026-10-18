@@ -2,12 +2,18 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.v1.docs import errors
-from api.v1.utils import CreatedRangeSchema, get_created_range, get_principal
-from components.core.access import OrganizationRequiredError, Principal
-from components.core.database import get_session
+from api.v1.utils import (
+    CreatedRangeSchema,
+    SessionDep,
+    get_created_range,
+    get_principal,
+)
+from components.core.exceptions import OrganizationRequiredError
+from components.core.schemas import Principal
+from components.datasets.dependencies import build_dataset_service
+from components.datasets.exceptions import DatasetNotFoundError
 from components.datasets.schemas import (
     DatasetCreateSchema,
     DatasetDetailSchema,
@@ -17,7 +23,7 @@ from components.datasets.schemas import (
     TestCasePageSchema,
     TestCaseSchema,
 )
-from components.datasets.service import DatasetNotFoundError, DatasetService
+from components.datasets.service import DatasetService
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -25,10 +31,8 @@ Limit = Annotated[int, Query(ge=1, le=100)]
 Offset = Annotated[int, Query(ge=0)]
 
 
-def get_dataset_service(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> DatasetService:
-    return DatasetService(session)
+def get_dataset_service(session: SessionDep) -> DatasetService:
+    return build_dataset_service(session)
 
 
 ServiceDep = Annotated[DatasetService, Depends(get_dataset_service)]

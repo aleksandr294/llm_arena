@@ -11,13 +11,10 @@ from pydantic import (
     model_validator,
 )
 
-from components.datasets.schemas import (
-    TEXT_MAX,
-    NameStr,
-    _reject_nul,
-)
+from components.core.utils import reject_nul
+from components.datasets.schemas import TEXT_MAX, NameStr
 from components.evaluation.schemas import EvaluatorConfigSchema
-from components.experiments.logic import INPUT_TOKEN
+from components.experiments.utils import INPUT_TOKEN
 from components.third_party.llm.schemas import ModelTargetSchema
 
 MAX_TARGETS = 10
@@ -36,13 +33,13 @@ def _require_input_token(value: str) -> str:
 PromptTemplateStr = Annotated[
     str,
     StringConstraints(min_length=1, max_length=TEXT_MAX),
-    AfterValidator(_reject_nul),
+    AfterValidator(reject_nul),
     AfterValidator(_require_input_token),
 ]
 SystemPromptStr = Annotated[
     str,
     StringConstraints(min_length=1, max_length=TEXT_MAX),
-    AfterValidator(_reject_nul),
+    AfterValidator(reject_nul),
 ]
 
 

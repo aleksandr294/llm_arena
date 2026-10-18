@@ -3,32 +3,38 @@
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
+from functools import partial
 from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.core.access import Principal
+from components.core.database import SessionScope, session_scope
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
+from components.experiments.dependencies import build_experiment_service
 from components.experiments.schemas import (
     ExperimentConfigSchema,
     ExperimentCreateSchema,
 )
-from components.experiments.service import ExperimentService
-from components.third_party.llm.providers.base import LLMProviderError
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
+from components.third_party.llm.exceptions import (
+    LLMProviderError,
+    ProviderNotConfiguredError,
+)
 from components.third_party.llm.schemas import (
-    LLMErrorKind,
     LLMResponseSchema,
     LLMUsageSchema,
     ModelTargetSchema,
-    ProviderName,
 )
-from components.third_party.llm.service import (
-    LLMService,
-    ProviderNotConfiguredError,
-)
+from components.third_party.llm.service import LLMService
 from tests.access import ROOT, seed_principal
 
 Factory = async_sessionmaker[AsyncSession]
+
+
+def scope_of(factory: Factory) -> SessionScope:
+    """The ``session_scope`` the task would inject, bound to a test factory."""
+    return partial(session_scope, factory)
 
 
 def response(
@@ -184,7 +190,9 @@ async def make_experiment(
     dataset_id = await make_dataset(factory, cases, owner)
     enqueue = enqueued or Enqueued()
     async with factory() as session:
-        service = ExperimentService(session, FakeLLM().as_service(), enqueue)
+        service = build_experiment_service(
+            session, FakeLLM().as_service(), enqueue
+        )
         experiment = await service.create(
             owner, create_data(dataset_id, models, max_attempts)
         )
@@ -192,7 +200,7 @@ async def make_experiment(
         experiment_id = experiment.id
     if start:
         async with factory() as session:
-            service = ExperimentService(
+            service = build_experiment_service(
                 session, FakeLLM().as_service(), enqueue
             )
             await service.start(ROOT, experiment_id)

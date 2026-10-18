@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.core.database import get_session
+from components.core.database import get_session, session_scope
 from components.datasets.models import Dataset
 from tests.access import Actors
 
@@ -24,14 +24,8 @@ def _use_scratch_db(
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
 ) -> None:
     async def override() -> AsyncIterator[AsyncSession]:
-        # Same unit-of-work semantics as get_session.
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except BaseException:
-                await session.rollback()
-                raise
+        async with session_scope(session_factory) as session:
+            yield session
 
     app.dependency_overrides[get_session] = override
 

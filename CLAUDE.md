@@ -54,33 +54,62 @@ The backend uses a modular structure. Keep API handling, business logic, persist
 ```
 llm-arena/
 ├── api/
+│   ├── app.py                   # create_app
 │   └── v1/
 │       ├── router.py
-│       ├── utils.py
+│       ├── utils.py             # shared Depends helpers
+│       ├── docs.py
 │       └── endpoints/
 ├── admin/                       # fastadmin panel, per-component admin classes
+│   ├── core.py
+│   ├── schemas.py
+│   └── <component_name>/admin.py
 ├── components/
 │   ├── core/                    # Base classes, config, DB, BaseRepository
-│   └── <component_name>/
-│   │    ├── models.py
-│   │    ├── schemas.py
-│   │    ├── repository.py
-│   │    ├── service.py
-│   │    ├── tasks.py
+│   │   ├── config.py
+│   │   ├── database.py          # session_scope, commit, on_commit, get_session
+│   │   ├── repository.py        # BaseRepository
+│   │   ├── access.py
+│   │   ├── enums.py             # shared enums
+│   │   ├── exceptions.py        # shared exceptions
+│   │   ├── schemas.py           # shared schemas / data classes
+│   │   ├── utils.py             # shared helpers
+│   │   └── health.py
+│   ├── <component_name>/
+│   │   ├── models.py
+│   │   ├── schemas.py
+│   │   ├── repository.py
+│   │   ├── service.py
+│   │   ├── tasks.py
+│   │   ├── exceptions.py        # where the component has any
+│   │   ├── enums.py             # where the component has any
+│   │   ├── utils.py             # where the component has any
+│   │   └── dependencies.py      # build_* factories wiring the service
 │   └── third_party/
 │       └── llm/
 │           ├── providers/       # BaseLLMProvider + Anthropic / OpenAI 
 │           ├── schemas.py       
+│           ├── exceptions.py
+│           ├── enums.py
 │           └── service.py       # LLMService
 ├── migrations/                  # Alembic
+├── tests/                       # per component, mirrors components/
+├── docs/                        # reference pages linked from README.md
 ├── main.py                      # python main.py API
 ├── cli.py                       # python cli.py create-superadmin
 ├── taskiq_app.py                     
-├── conftest.py                     
+├── conftest.py                  # the only conftest.py
 ├── .env.example
 └── CLAUDE.md
 ```
 This is the intended structure, not a requirement to create every file immediately. Follow the existing repository structure if it has already been established.
+
+### Conventions
+
+- **Exceptions, enums, data classes, helpers:** each has one home. `exceptions.py` and `enums.py` are leaf modules (they import only the standard library, other leaf modules and `core`, never services, repositories or models). Definitions used by several components live in `components/core/{exceptions,enums,schemas,utils}.py`; private single-use helpers stay where they are. Move a name and update every import; do not leave re-export shims.
+- **Dependency injection:** pass non-database collaborators (other services, providers, clients, settings values, ports such as `enqueue`) through constructors. Wire them only at entry points (FastAPI `Depends`, Taskiq tasks, `cli.py`, admin classes) with the `build_*` factories in each component's `dependencies.py` (plain functions, no FastAPI imports). Services never create sessions, settings or other services. An optional production default is allowed only as a constructor parameter resolved with `if x is None` (never `x or Default()`). No DI library.
+- **Session and transactions:** the entry point obtains the session and passes it endpoint/task -> service -> repository; services and repositories never open sessions. One business operation is one commit, through `session_scope()` (tasks, CLI, admin) or the HTTP `get_session` dependency (declared with `scope="function"`). Register side effects that must follow durable data with `on_commit`; where an operation must finish with a commit so they run, use `commit(session)`. Do not call `session.commit()` outside `components/core/database.py`. An operation with a slow external call is split into short operations instead of holding a transaction open (see `ExperimentRunner`).
+- **Tests:** exactly one `conftest.py`, at the repository root, holding fixtures used by more than one test module. Fixtures used by a single module stay in that module; plain helper modules (`tests/**/helpers.py`) are not fixtures.
 
 ## Component Responsibilities
 

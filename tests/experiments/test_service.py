@@ -1,28 +1,28 @@
 """Integration tests: need PostgreSQL (``DATABASE_URL``)."""
 
 import uuid
+from collections.abc import Sequence
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from components.core.access import OrganizationRequiredError, Role
+from components.core.enums import Role
+from components.core.exceptions import OrganizationRequiredError
+from components.datasets.exceptions import DatasetNotFoundError
 from components.datasets.models import TestCase
-from components.datasets.service import DatasetNotFoundError
-from components.experiments.models import (
-    Experiment,
-    ExperimentResult,
-    ExperimentStatus,
-    ResultStatus,
-)
-from components.experiments.repository import ExperimentResultRepository
-from components.experiments.service import (
+from components.experiments.dependencies import build_experiment_service
+from components.experiments.enums import ExperimentStatus, ResultStatus
+from components.experiments.exceptions import (
     ExperimentNotFoundError,
-    ExperimentService,
     ExperimentValidationError,
     InvalidTransitionError,
 )
-from components.third_party.llm.schemas import ProviderName
+from components.experiments.models import Experiment, ExperimentResult
+from components.experiments.repository import ExperimentResultRepository
+from components.experiments.service import ExperimentService
+from components.third_party.llm.enums import ProviderName
 from tests.access import ROOT, seed_principal
 from tests.experiments.helpers import (
     Enqueued,
@@ -41,7 +41,7 @@ def _service(
     enqueued: Enqueued | None = None,
     llm: FakeLLM | None = None,
 ) -> ExperimentService:
-    return ExperimentService(
+    return build_experiment_service(
         session, (llm or FakeLLM()).as_service(), enqueued or Enqueued()
     )
 
@@ -205,7 +205,7 @@ async def test_start_enqueue_failure_keeps_results_pending(
         raise ConnectionError("broker down")
 
     async with session_factory() as s:
-        service = ExperimentService(s, FakeLLM().as_service(), boom)
+        service = build_experiment_service(s, FakeLLM().as_service(), boom)
         with pytest.raises(ConnectionError):
             await service.start(ROOT, experiment_id)
     async with session_factory() as s:
@@ -478,3 +478,51 @@ async def test_list_filters_and_totals(session_factory: Factory) -> None:
             ROOT, 10, 0, status="pending", owner_id=other.user_id
         )
         assert ([i.id for i in items], total) == ([theirs], 1)
+
+
+class _SpyLLM(FakeLLM):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.ready_checks: list[ProviderName] = []
+
+    def ensure_provider_ready(self, name: ProviderName) -> None:
+        self.ready_checks.append(name)
+        super().ensure_provider_ready(name)
+
+
+async def test_create_uses_the_injected_llm_service(
+    session_factory: Factory,
+) -> None:
+    owner = await seed_principal(session_factory)
+    dataset_id = await make_dataset(session_factory, cases=1, owner=owner)
+    llm = _SpyLLM()
+    async with session_factory() as s:
+        service = _service(s, llm=llm)
+        assert cast(object, service.llm) is llm
+        await service.create(owner, create_data(dataset_id, ("m1", "m2")))
+    assert llm.ready_checks == [ProviderName.OPENAI, ProviderName.OPENAI]
+    assert llm.calls == []
+
+
+async def test_start_calls_the_injected_enqueue_once_after_commit(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=2)
+    pending = await _result_ids(session_factory, experiment_id)
+    seen: list[str] = []
+    batches: list[list[uuid.UUID]] = []
+
+    async def enqueue(ids: Sequence[uuid.UUID]) -> None:
+        batches.append(list(ids))
+        async with session_factory() as other:
+            row = await other.get(Experiment, experiment_id)
+            assert row is not None
+            seen.append(row.status)
+
+    async with session_factory() as s:
+        service = build_experiment_service(s, FakeLLM().as_service(), enqueue)
+        assert service.enqueue is enqueue
+        assert await service.start(ROOT, experiment_id) == 2
+    assert len(batches) == 1
+    assert sorted(batches[0]) == sorted(pending)
+    assert seen == ["running"]

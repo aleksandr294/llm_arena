@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import FunctionFilter
 
 from components.evaluation.models import EvaluationResult
-from components.experiments.models import ExperimentResult, ResultStatus
+from components.experiments.enums import ResultStatus
+from components.experiments.models import ExperimentResult
 
 TargetKey = tuple[str, str]
 

@@ -10,14 +10,15 @@ import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from taskiq import InMemoryBroker
 
-from components.experiments.models import ExperimentStatus, ResultStatus
+from components.experiments.dependencies import build_experiment_service
+from components.experiments.enums import ExperimentStatus, ResultStatus
 from components.experiments.runner import ExperimentRunner
-from components.experiments.service import ExperimentService
 from tests.access import ROOT
 from tests.experiments.helpers import (
     Factory,
     FakeLLM,
     make_experiment,
+    scope_of,
 )
 from tests.experiments.test_runner import _experiment, _ids, _row
 
@@ -47,7 +48,7 @@ async def test_started_experiment_executes_to_final_status(
     monkeypatch: MonkeyPatch,
 ) -> None:
     llm = FakeLLM()
-    runner = ExperimentRunner(session_factory, llm.as_service(), 2)
+    runner = ExperimentRunner(scope_of(session_factory), llm.as_service(), 2)
     monkeypatch.setattr(tasks_module, "get_runner", lambda: runner)
     memory = InMemoryBroker()
     task: Any = memory.register_task(
@@ -61,7 +62,7 @@ async def test_started_experiment_executes_to_final_status(
 
     experiment_id = await make_experiment(session_factory, cases=3)
     async with session_factory() as s:
-        service = ExperimentService(s, llm.as_service(), enqueue)
+        service = build_experiment_service(s, llm.as_service(), enqueue)
         assert await service.start(ROOT, experiment_id) == 3
     await memory.wait_all()
     await memory.shutdown()
@@ -90,7 +91,7 @@ async def test_enqueueing_alone_leaves_results_pending(
 
     experiment_id = await make_experiment(session_factory, cases=2)
     async with session_factory() as s:
-        service = ExperimentService(s, llm.as_service(), enqueue)
+        service = build_experiment_service(s, llm.as_service(), enqueue)
         await service.start(ROOT, experiment_id)
 
     assert len(sent) == 2

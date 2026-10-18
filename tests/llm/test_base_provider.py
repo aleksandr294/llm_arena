@@ -1,10 +1,8 @@
 import pytest
 
-from components.third_party.llm.providers.base import (
-    BaseLLMProvider,
-    LLMProviderError,
-)
-from components.third_party.llm.schemas import LLMErrorKind, ProviderName
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
+from components.third_party.llm.exceptions import LLMProviderError
+from components.third_party.llm.providers.base import BaseLLMProvider
 
 RETRYABLE = {
     LLMErrorKind.TIMEOUT: True,

@@ -4,6 +4,7 @@ import importlib
 import sys
 import uuid
 from collections.abc import Iterator
+from functools import partial
 from types import ModuleType
 from typing import Any
 
@@ -12,18 +13,21 @@ from _pytest.monkeypatch import MonkeyPatch
 from sqlalchemy import select
 from taskiq import InMemoryBroker
 
+from components.core.database import session_scope
 from components.evaluation.models import EvaluationResult
-from components.evaluation.service import EvaluationService
-from components.experiments.models import Experiment, ExperimentStatus
+from components.experiments.dependencies import build_experiment_service
+from components.experiments.enums import ExperimentStatus
+from components.experiments.models import Experiment
 from components.experiments.runner import ExperimentRunner
-from components.experiments.service import ExperimentService
 from tests.access import ROOT, seed_principal
+from tests.evaluation.helpers import ScopedEvaluation
 from tests.evaluation.test_repository import Factory
 from tests.experiments.helpers import (
     FakeLLM,
     create_data,
     make_dataset,
     response,
+    scope_of,
 )
 
 pytestmark = pytest.mark.integration
@@ -70,9 +74,7 @@ async def test_started_experiment_ends_with_stored_evaluations(
         task_name=experiments.EXECUTE_RESULT_TASK,
     )
     monkeypatch.setattr(
-        evaluation,
-        "get_service",
-        lambda: EvaluationService(session_factory),
+        evaluation, "session_scope", partial(session_scope, session_factory)
     )
 
     async def on_succeeded(result_id: uuid.UUID) -> None:
@@ -81,7 +83,10 @@ async def test_started_experiment_ends_with_stored_evaluations(
     llm = FakeLLM()
     llm.handler = lambda prompt: _answer(prompt)
     runner = ExperimentRunner(
-        session_factory, llm.as_service(), 2, on_succeeded=on_succeeded
+        scope_of(session_factory),
+        llm.as_service(),
+        2,
+        on_succeeded=on_succeeded,
     )
     monkeypatch.setattr(experiments, "get_runner", lambda: runner)
     await memory.startup()
@@ -101,13 +106,13 @@ async def test_started_experiment_ends_with_stored_evaluations(
         }
     )
     async with session_factory() as s:
-        service = ExperimentService(s, llm.as_service(), enqueue)
+        service = build_experiment_service(s, llm.as_service(), enqueue)
         experiment = await service.create(owner, data)
         await s.commit()
         experiment_id = experiment.id
     async with session_factory() as s:
         assert (
-            await ExperimentService(s, llm.as_service(), enqueue).start(
+            await build_experiment_service(s, llm.as_service(), enqueue).start(
                 ROOT, experiment_id
             )
             == 3
@@ -127,7 +132,7 @@ async def test_started_experiment_ends_with_stored_evaluations(
     for row in rows:
         by_id.setdefault(row.evaluator_id, set()).add(row.status)
     assert by_id == {"exact": {"passed"}, "len": {"passed"}}
-    summary = await EvaluationService(session_factory).summary(
+    summary = await ScopedEvaluation(session_factory).summary(
         ROOT, experiment_id
     )
     assert summary.unevaluated_results == 0

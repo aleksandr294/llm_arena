@@ -18,9 +18,10 @@ from typer.testing import CliRunner
 
 import cli
 from components.auth.models import RefreshToken
-from components.core.access import Role
+from components.core import database
+from components.core.enums import Role
 from components.users.models import User
-from tests.auth.conftest import PASSWORD, Factory, seed_user
+from tests.auth.helpers import PASSWORD, Factory, seed_user
 
 pytestmark = pytest.mark.integration
 
@@ -216,7 +217,7 @@ async def test_cli_does_not_log_secrets(
     # pool-less engine whose connections do not outlive that loop.
     engine = create_async_engine(os.environ["DATABASE_URL"], poolclass=NullPool)
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(cli, "get_session_factory", lambda: factory)
+    monkeypatch.setattr(database, "get_session_factory", lambda: factory)
     monkeypatch.setenv(cli.PASSWORD_ENV, CLI_PASSWORD)
     runner = CliRunner()
 

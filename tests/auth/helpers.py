@@ -1,62 +1,23 @@
-import os
+"""Plain helpers for the auth tests (not fixtures)."""
+
 import uuid
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import cast
 
-import pytest
-from fastapi import FastAPI
 from httpx import AsyncClient
-from sqlalchemy import Table
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from api.v1.utils import get_settings_dependency
 from components.auth.models import RefreshToken
 from components.auth.security import hash_password
-from components.core.access import Role
-from components.core.config import SettingsSchema
-from components.core.database import Base, create_engine, get_session
+from components.core.enums import Role
 from components.organizations.models import Organization
 from components.organizations.repository import OrganizationRepository
 from components.users.models import User
 from components.users.repository import UserRepository
-from conftest import TEST_JWT_SECRET
 
 MODELS = (Organization, User, RefreshToken)
 PASSWORD = "correct horse battery"
 
 Factory = async_sessionmaker[AsyncSession]
-
-
-@pytest.fixture
-def settings() -> SettingsSchema:
-    return SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-        jwt_secret_key=TEST_JWT_SECRET,
-    )
-
-
-@pytest.fixture
-async def engine() -> AsyncIterator[AsyncEngine]:
-    engine = create_engine(os.environ["DATABASE_URL"])
-    tables = [cast(Table, m.__table__) for m in MODELS]
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all, tables=tables)
-        await conn.run_sync(Base.metadata.create_all, tables=tables)
-    yield engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all, tables=tables)
-    await engine.dispose()
-
-
-@pytest.fixture
-def session_factory(engine: AsyncEngine) -> Factory:
-    return async_sessionmaker(engine, expire_on_commit=False)
 
 
 @dataclass(frozen=True)
@@ -91,20 +52,6 @@ async def seed_user(
         )
         await session.commit()
         return Seeded(user.id, organization_id, email)
-
-
-@pytest.fixture
-def api(
-    app: FastAPI, session_factory: Factory, settings: SettingsSchema
-) -> None:
-    """Point the app at the test database and settings."""
-
-    async def session_override() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_session] = session_override
-    app.dependency_overrides[get_settings_dependency] = lambda: settings
 
 
 async def login_headers(

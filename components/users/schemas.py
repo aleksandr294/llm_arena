@@ -5,9 +5,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from components.auth.security import PASSWORD_MAX_LENGTH
-from components.core.access import Role
+from components.core.enums import Role
 from components.core.schemas import NoNulStr
-from components.users.service import EMAIL_MAX_LENGTH
+from components.users.utils import EMAIL_MAX_LENGTH
 
 
 class UserCreateSchema(BaseModel):

@@ -4,16 +4,20 @@ whose messages never contain tokens, hashes, passwords or emails."""
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import StrEnum
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from components.auth.enums import RejectionReason, TokenType
+from components.auth.exceptions import (
+    AccessTokenRejectedError,
+    ExpiredTokenError,
+    InvalidCredentialsError,
+    InvalidRefreshTokenError,
+    InvalidTokenError,
+)
 from components.auth.repository import RefreshTokenRepository
 from components.auth.security import (
-    ExpiredTokenError,
-    InvalidTokenError,
     IssuedToken,
-    TokenType,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -23,37 +27,13 @@ from components.auth.security import (
     verify_dummy_password,
     verify_password,
 )
-from components.core.access import Principal, Role
 from components.core.config import SettingsSchema
+from components.core.database import commit
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.organizations.repository import OrganizationRepository
 from components.users.models import User
 from components.users.repository import UserRepository
-
-
-class InvalidCredentialsError(Exception):
-    """Unknown email, wrong password, or inactive user or organization."""
-
-    def __init__(self) -> None:
-        super().__init__("invalid credentials")
-
-
-class InvalidRefreshTokenError(Exception):
-    """Refresh token is malformed, expired, revoked, used or unknown."""
-
-    def __init__(self) -> None:
-        super().__init__("invalid refresh token")
-
-
-class RejectionReason(StrEnum):
-    EXPIRED = "expired"
-    INVALID = "invalid"
-    REVOKED = "revoked"
-
-
-class AccessTokenRejectedError(Exception):
-    def __init__(self, reason: RejectionReason) -> None:
-        super().__init__(f"access token rejected: {reason.value}")
-        self.reason = reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,8 +54,10 @@ class ValidationResult:
 
 
 class AuthService:
-    """Owns the transaction: each public operation commits its own work, so
-    reuse detection persists the family revocation before failing."""
+    """Uses the caller's session; the entry point commits once per
+    operation. The exception is refresh-token reuse (and a dead login at
+    refresh), which revokes the family, commits and then raises: the
+    revocation must persist although the request fails."""
 
     def __init__(self, session: AsyncSession, settings: SettingsSchema) -> None:
         self.session = session
@@ -98,9 +80,7 @@ class AuthService:
             await self.users.replace_password_hash(
                 user.id, user.password_hash, await hash_password(password)
             )
-        pair = await self._issue_pair(user.id, uuid.uuid4())
-        await self.session.commit()
-        return pair
+        return await self._issue_pair(user.id, uuid.uuid4())
 
     async def refresh(self, refresh_token: str) -> TokenPair:
         try:
@@ -123,16 +103,16 @@ class AuthService:
         ):
             # A used token presented again: assume theft, end the login.
             await self.tokens.revoke_family(record.family_id)
-            await self.session.commit()
+            # Persist-then-reject: the single commit of this operation.
+            await commit(self.session)
             raise InvalidRefreshTokenError
         user = await self.users.get(record.user_id)
         if user is None or not await self._is_active(user):
             await self.tokens.revoke_family(record.family_id)
-            await self.session.commit()
+            # Persist-then-reject, as above.
+            await commit(self.session)
             raise InvalidRefreshTokenError
-        pair = await self._issue_pair(user.id, record.family_id)
-        await self.session.commit()
-        return pair
+        return await self._issue_pair(user.id, record.family_id)
 
     async def logout(self, refresh_token: str) -> None:
         """Revoke the login of a refresh token. Idempotent: an already
@@ -151,7 +131,6 @@ class AuthService:
         record = await self.tokens.get_by_hash(hash_token_id(claims.jti))
         if record is not None and record.user_id == claims.user_id:
             await self.tokens.revoke_family(record.family_id)
-            await self.session.commit()
 
     async def authenticate(self, access_token: str) -> Principal:
         """Resolve the caller from the database, not from token claims."""

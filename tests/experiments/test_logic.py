@@ -1,11 +1,11 @@
 import pytest
 
-from components.experiments.logic import (
+from components.experiments.enums import ExperimentStatus
+from components.experiments.utils import (
     backoff_delay,
     derive_final_status,
     render_prompt,
 )
-from components.experiments.models import ExperimentStatus
 
 
 def test_render_replaces_both_tokens() -> None:

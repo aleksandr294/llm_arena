@@ -2,23 +2,23 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.v1.docs import errors
-from api.v1.utils import get_principal
-from components.core.access import Principal, Role
-from components.core.database import get_session
+from api.v1.utils import SessionDep, get_principal
+from components.core.enums import Role
+from components.core.schemas import Principal
+from components.organizations.dependencies import build_organization_service
+from components.organizations.exceptions import (
+    DuplicateOrganizationNameError,
+    OrganizationNotFoundError,
+)
 from components.organizations.schemas import (
     OrganizationCreateSchema,
     OrganizationPageSchema,
     OrganizationSchema,
     OrganizationUpdateSchema,
 )
-from components.organizations.service import (
-    DuplicateOrganizationNameError,
-    OrganizationNotFoundError,
-    OrganizationService,
-)
+from components.organizations.service import OrganizationService
 
 Limit = Annotated[int, Query(ge=1, le=100)]
 Offset = Annotated[int, Query(ge=0)]
@@ -40,10 +40,8 @@ router = APIRouter(
 )
 
 
-def get_organization_service(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> OrganizationService:
-    return OrganizationService(session)
+def get_organization_service(session: SessionDep) -> OrganizationService:
+    return build_organization_service(session)
 
 
 ServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]

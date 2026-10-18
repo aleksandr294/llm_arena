@@ -10,13 +10,12 @@ from typing import Annotated
 
 import typer
 
-from components.auth.security import PasswordPolicyError
-from components.core.database import get_session_factory
-from components.users.service import (
-    DuplicateEmailError,
-    InvalidEmailError,
-    UserService,
-)
+from components.auth.dependencies import build_auth_service
+from components.auth.exceptions import PasswordPolicyError
+from components.core.config import get_settings
+from components.core.database import session_scope
+from components.users.dependencies import build_user_service
+from components.users.exceptions import DuplicateEmailError, InvalidEmailError
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -29,8 +28,11 @@ def main() -> None:
 
 
 async def _create_superadmin(email: str, password: str) -> str:
-    async with get_session_factory()() as session:
-        user = await UserService(session).create_superadmin(email, password)
+    async with session_scope() as session:
+        service = build_user_service(
+            session, build_auth_service(session, get_settings())
+        )
+        user = await service.create_superadmin(email, password)
         return str(user.id)
 
 

@@ -8,7 +8,7 @@ import jwt
 import pytest
 
 from tests.access import PASSWORD
-from tests.admin.conftest import World
+from tests.admin.helpers import World
 from tests.admin.panel_process import ADMIN_SECRET, API, Panel
 
 pytestmark = pytest.mark.integration

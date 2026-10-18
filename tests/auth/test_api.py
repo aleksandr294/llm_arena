@@ -21,12 +21,13 @@ from components.auth.security import (
     create_refresh_token,
     hash_token_id,
 )
-from components.core.access import Principal, Role
 from components.core.config import SettingsSchema
-from components.core.database import get_session
+from components.core.database import get_session, session_scope
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.organizations.models import Organization
 from components.users.models import User
-from tests.auth.conftest import PASSWORD, Factory, Seeded, seed_user
+from tests.auth.helpers import PASSWORD, Factory, Seeded, seed_user
 
 pytestmark = pytest.mark.integration
 
@@ -36,7 +37,7 @@ def _overrides(
     app: FastAPI, session_factory: Factory, settings: SettingsSchema
 ) -> None:
     async def session_override() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
+        async with session_scope(session_factory) as session:
             yield session
 
     app.dependency_overrides[get_session] = session_override

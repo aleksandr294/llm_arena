@@ -6,13 +6,18 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 from typing import Any, Final
 
 import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
+from components.auth.enums import TokenType
+from components.auth.exceptions import (
+    ExpiredTokenError,
+    InvalidTokenError,
+    PasswordPolicyError,
+)
 from components.core.config import SettingsSchema
 
 PASSWORD_MIN_LENGTH: Final = 12
@@ -25,10 +30,6 @@ _REQUIRED_CLAIMS: Final = ["exp", "iat", "iss", "sub", "jti", "typ"]
 _hasher = PasswordHasher()
 # Verified for unknown users so the response time matches a real check.
 _DUMMY_HASH: Final = _hasher.hash("dummy-password-for-timing-equalisation")
-
-
-class PasswordPolicyError(ValueError):
-    """The password violates the policy; the message never echoes it."""
 
 
 def validate_password_policy(password: str) -> None:
@@ -92,23 +93,6 @@ def password_needs_rehash(password_hash: str) -> bool:
 def hash_token_id(jti: str) -> str:
     """SHA-256 hex digest stored instead of the refresh token identifier."""
     return hashlib.sha256(jti.encode("utf-8")).hexdigest()
-
-
-class TokenType(StrEnum):
-    ACCESS = "access"
-    REFRESH = "refresh"
-
-
-class TokenError(Exception):
-    """Base class for token validation failures (messages carry no token)."""
-
-
-class InvalidTokenError(TokenError):
-    pass
-
-
-class ExpiredTokenError(TokenError):
-    pass
 
 
 @dataclass(frozen=True, slots=True)

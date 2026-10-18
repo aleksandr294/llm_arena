@@ -2,15 +2,25 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.v1.docs import errors
-from api.v1.utils import CreatedRangeSchema, get_created_range, get_principal
-from components.core.access import OrganizationRequiredError, Principal
+from api.v1.utils import (
+    CreatedRangeSchema,
+    SessionDep,
+    get_created_range,
+    get_principal,
+)
 from components.core.config import get_settings
-from components.core.database import get_session
-from components.datasets.service import DatasetNotFoundError
-from components.experiments.models import ExperimentStatus, ResultStatus
+from components.core.exceptions import OrganizationRequiredError
+from components.core.schemas import Principal
+from components.datasets.exceptions import DatasetNotFoundError
+from components.experiments.dependencies import build_experiment_service
+from components.experiments.enums import ExperimentStatus, ResultStatus
+from components.experiments.exceptions import (
+    ExperimentNotFoundError,
+    ExperimentValidationError,
+    InvalidTransitionError,
+)
 from components.experiments.schemas import (
     ExperimentCreateSchema,
     ExperimentDetailSchema,
@@ -20,13 +30,7 @@ from components.experiments.schemas import (
     ExperimentResultSchema,
     ExperimentSchema,
 )
-from components.experiments.service import (
-    EnqueueResults,
-    ExperimentNotFoundError,
-    ExperimentService,
-    ExperimentValidationError,
-    InvalidTransitionError,
-)
+from components.experiments.service import EnqueueResults, ExperimentService
 from components.experiments.tasks import submit_results
 from components.third_party.llm.service import LLMService
 
@@ -46,11 +50,11 @@ def get_llm_service() -> LLMService:
 
 
 def get_experiment_service(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: SessionDep,
     llm: Annotated[LLMService, Depends(get_llm_service)],
     enqueue: Annotated[EnqueueResults, Depends(get_enqueue)],
 ) -> ExperimentService:
-    return ExperimentService(session, llm, enqueue)
+    return build_experiment_service(session, llm, enqueue)
 
 
 ServiceDep = Annotated[ExperimentService, Depends(get_experiment_service)]

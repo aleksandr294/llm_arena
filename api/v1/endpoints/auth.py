@@ -4,6 +4,10 @@ from fastapi import APIRouter, Depends, Response, status
 
 from api.v1.docs import errors
 from api.v1.utils import get_auth_service, unauthorized
+from components.auth.exceptions import (
+    InvalidCredentialsError,
+    InvalidRefreshTokenError,
+)
 from components.auth.schemas import (
     LoginRequestSchema,
     RefreshRequestSchema,
@@ -11,12 +15,7 @@ from components.auth.schemas import (
     ValidateRequestSchema,
     ValidationResultSchema,
 )
-from components.auth.service import (
-    AuthService,
-    InvalidCredentialsError,
-    InvalidRefreshTokenError,
-    TokenPair,
-)
+from components.auth.service import AuthService, TokenPair
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 

@@ -8,18 +8,16 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.orm import aliased, selectinload
 
-from admin.core import (
-    ReadOnlyScopedAdmin,
-    SessionUser,
-    scoped_sessionmaker,
-)
-from components.core.access import Principal, Role
+from admin.core import ReadOnlyScopedAdmin, scoped_sessionmaker
+from admin.schemas import SessionUser
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.evaluation.models import EvaluationResult
 from components.experiments.models import Experiment, ExperimentResult
 from components.organizations.models import Organization
 from components.users.models import User
-from tests.admin.conftest import World
+from tests.admin.helpers import World
 
 pytestmark = pytest.mark.integration
 

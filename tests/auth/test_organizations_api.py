@@ -7,8 +7,8 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from components.auth.models import RefreshToken
-from components.core.access import Role
-from tests.auth.conftest import Factory, login_headers, seed_user
+from components.core.enums import Role
+from tests.auth.helpers import Factory, login_headers, seed_user
 
 pytestmark = pytest.mark.integration
 

@@ -3,6 +3,7 @@
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 from argon2 import PasswordHasher
@@ -10,6 +11,12 @@ from sqlalchemy import select, update
 
 from components.auth import security
 from components.auth import service as service_module
+from components.auth.dependencies import build_auth_service
+from components.auth.enums import RejectionReason
+from components.auth.exceptions import (
+    InvalidCredentialsError,
+    InvalidRefreshTokenError,
+)
 from components.auth.models import RefreshToken
 from components.auth.repository import RefreshTokenRepository
 from components.auth.security import (
@@ -17,20 +24,14 @@ from components.auth.security import (
     create_refresh_token,
     hash_token_id,
 )
-from components.auth.service import (
-    AuthService,
-    InvalidCredentialsError,
-    InvalidRefreshTokenError,
-    RejectionReason,
-    TokenPair,
-    ValidationResult,
-)
-from components.core.access import Role
+from components.auth.service import TokenPair, ValidationResult
 from components.core.config import SettingsSchema
+from components.core.database import session_scope
+from components.core.enums import Role
 from components.organizations.models import Organization
 from components.users.models import User
 from components.users.repository import UserRepository
-from tests.auth.conftest import PASSWORD, Factory, seed_user
+from tests.auth.helpers import PASSWORD, Factory, seed_user
 
 pytestmark = pytest.mark.integration
 
@@ -43,25 +44,28 @@ class Api:
         self.settings = settings
 
     async def login(self, email: str, password: str = PASSWORD) -> TokenPair:
-        async with self.factory() as s:
-            return await AuthService(s, self.settings).login(email, password)
+        async with session_scope(self.factory) as s:
+            return await build_auth_service(s, self.settings).login(
+                email, password
+            )
 
     async def refresh(self, token: str) -> TokenPair:
-        async with self.factory() as s:
-            return await AuthService(s, self.settings).refresh(token)
+        async with session_scope(self.factory) as s:
+            return await build_auth_service(s, self.settings).refresh(token)
 
     async def logout(self, token: str) -> None:
-        async with self.factory() as s:
-            await AuthService(s, self.settings).logout(token)
+        async with session_scope(self.factory) as s:
+            await build_auth_service(s, self.settings).logout(token)
 
     async def validate(self, token: str) -> ValidationResult:
-        async with self.factory() as s:
-            return await AuthService(s, self.settings).validate(token)
+        async with session_scope(self.factory) as s:
+            return await build_auth_service(s, self.settings).validate(token)
 
     async def revoke_all(self, user_id: uuid.UUID) -> None:
-        async with self.factory() as s:
-            await AuthService(s, self.settings).revoke_all_sessions(user_id)
-            await s.commit()
+        async with session_scope(self.factory) as s:
+            await build_auth_service(s, self.settings).revoke_all_sessions(
+                user_id
+            )
 
 
 @pytest.fixture
@@ -494,3 +498,50 @@ async def test_validate_uses_database_role(
     token = (await api.login(user.email)).access_token
     await _set_user(session_factory, user.user_id, role="admin")
     assert (await api.validate(token)).role is Role.ADMIN
+
+
+class _RecordingAuth:
+    """Stands in for ``AuthService``; records ``revoke_all_sessions``."""
+
+    def __init__(self) -> None:
+        self.revoked: list[uuid.UUID] = []
+
+    async def revoke_all_sessions(self, user_id: uuid.UUID) -> int:
+        self.revoked.append(user_id)
+        return 0
+
+
+@pytest.mark.parametrize(
+    "change", [{"is_active": False}, {"password": "a brand new password"}]
+)
+async def test_user_service_revokes_through_the_injected_auth(
+    session_factory: Factory, change: dict[str, object]
+) -> None:
+    from components.auth.service import AuthService
+    from components.core.schemas import Principal
+    from components.users.dependencies import build_user_service
+
+    root = Principal(uuid.uuid4(), None, Role.SUPERADMIN)
+    target = await seed_user(session_factory, "target@example.com")
+    auth = _RecordingAuth()
+    async with session_scope(session_factory) as session:
+        service = build_user_service(session, cast(AuthService, auth))
+        assert cast(object, service.auth) is auth
+        await service.update_user(root, target.user_id, **change)  # type: ignore[arg-type]
+    assert auth.revoked == [target.user_id]
+
+
+async def test_user_service_does_not_revoke_for_other_changes(
+    session_factory: Factory,
+) -> None:
+    from components.auth.service import AuthService
+    from components.core.schemas import Principal
+    from components.users.dependencies import build_user_service
+
+    root = Principal(uuid.uuid4(), None, Role.SUPERADMIN)
+    target = await seed_user(session_factory, "target@example.com")
+    auth = _RecordingAuth()
+    async with session_scope(session_factory) as session:
+        service = build_user_service(session, cast(AuthService, auth))
+        await service.update_user(root, target.user_id, role=Role.ADMIN)
+    assert auth.revoked == []

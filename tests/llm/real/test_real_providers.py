@@ -9,7 +9,8 @@ import os
 import pytest
 
 from components.core.config import SettingsSchema
-from components.third_party.llm.schemas import ModelTargetSchema, ProviderName
+from components.third_party.llm.enums import ProviderName
+from components.third_party.llm.schemas import ModelTargetSchema
 from components.third_party.llm.service import LLMService
 
 pytestmark = pytest.mark.real_provider

@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from components.auth.models import RefreshToken
 from components.auth.security import hash_password
-from components.core.access import Principal, Role
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.organizations.models import Organization
 from components.organizations.repository import OrganizationRepository
 from components.users.models import User

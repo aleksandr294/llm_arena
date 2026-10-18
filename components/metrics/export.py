@@ -11,31 +11,30 @@ import io
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import Text, literal, select, tuple_
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from components.core.access import Principal
+from components.core.database import SessionScope
+from components.core.schemas import Principal
 from components.evaluation.models import EvaluationResult
 from components.evaluation.schemas import parse_evaluator_config
+from components.experiments.exceptions import ExperimentNotFoundError
 from components.experiments.models import ExperimentResult
 from components.experiments.repository import ExperimentRepository
-from components.experiments.service import ExperimentNotFoundError
 from components.metrics.schemas import ComparisonSchema
 from components.metrics.service import MetricsService
+from components.metrics.utils import neutralize
 
 logger = logging.getLogger(__name__)
 
 EXPORT_BATCH_SIZE = 500
-# Spreadsheets treat cells starting with these as formulas.
-FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
 _R = ExperimentResult
-Factory = async_sessionmaker[AsyncSession]
+MetricsServiceFactory = Callable[[AsyncSession], MetricsService]
 
 
 @dataclass(frozen=True)
@@ -66,11 +65,6 @@ class ExportContext:
     comparison: ComparisonSchema
 
 
-def neutralize(value: str) -> str:
-    """Prefix a single quote so spreadsheets do not run text as a formula."""
-    return "'" + value if value.startswith(FORMULA_PREFIXES) else value
-
-
 def _evaluator_ids(evaluator_config: dict[str, Any]) -> list[str]:
     try:
         config = parse_evaluator_config(evaluator_config)
@@ -80,22 +74,24 @@ def _evaluator_ids(evaluator_config: dict[str, Any]) -> list[str]:
 
 
 async def prepare_export(
-    factory: Factory,
+    scope: SessionScope,
     principal: Principal,
     experiment_id: uuid.UUID,
-    pricing_file: str | None,
+    metrics_service: MetricsServiceFactory,
 ) -> ExportContext:
     """Raises ``ExperimentNotFoundError`` for a missing experiment or one
     outside the caller's scope, before anything is streamed. The comparison
     needs the whole experiment, so it is computed once here. Streaming
-    itself runs on the validated context only."""
-    async with factory() as session:
+    itself runs on the validated context only. ``scope`` opens the sessions
+    (injected by the endpoint); ``metrics_service`` builds the metrics
+    collaborator for the session opened here."""
+    async with scope() as session:
         experiment = await ExperimentRepository(session).get_scoped(
             experiment_id, principal
         )
         if experiment is None:
             raise ExperimentNotFoundError(experiment_id)
-        comparison = await MetricsService(session, pricing_file).comparison(
+        comparison = await metrics_service(session).comparison(
             principal, experiment_id
         )
         header = {
@@ -120,7 +116,7 @@ async def prepare_export(
 
 
 async def iter_rows(
-    factory: Factory,
+    scope: SessionScope,
     experiment_id: uuid.UUID,
     include_text: bool,
 ) -> AsyncIterator[list[ExportRow]]:
@@ -129,7 +125,7 @@ async def iter_rows(
     response text are selected only when ``include_text``."""
     last: tuple[int, str, str, uuid.UUID] | None = None
     while True:
-        async with factory() as session:
+        async with scope() as session:
             batch, last = await _read_batch(
                 session, experiment_id, include_text, last
             )
@@ -240,7 +236,7 @@ def _json_row(row: ExportRow, include_text: bool) -> dict[str, Any]:
 
 
 async def json_stream(
-    factory: Factory, context: ExportContext, include_responses: bool
+    scope: SessionScope, context: ExportContext, include_responses: bool
 ) -> AsyncIterator[str]:
     """A single JSON document: the header fields, then ``results`` written
     batch by batch. A failure mid-stream ends the stream without the closing
@@ -250,7 +246,7 @@ async def json_stream(
         head = json.dumps(context.header)
         yield head[:-1] + ', "results": ['
         async for batch in iter_rows(
-            factory, context.experiment_id, include_responses
+            scope, context.experiment_id, include_responses
         ):
             chunk = ", ".join(
                 json.dumps(_json_row(r, include_responses)) for r in batch
@@ -324,7 +320,7 @@ def _render(rows: list[list[str]]) -> str:
 
 
 async def csv_stream(
-    factory: Factory, context: ExportContext, include_responses: bool
+    scope: SessionScope, context: ExportContext, include_responses: bool
 ) -> AsyncIterator[str]:
     """Header row, then one row per result. Text cells starting with a
     formula character carry a leading single quote (documented alteration)."""
@@ -332,7 +328,7 @@ async def csv_stream(
     try:
         yield _render([csv_columns(context, include_responses)])
         async for batch in iter_rows(
-            factory, context.experiment_id, include_responses
+            scope, context.experiment_id, include_responses
         ):
             yield _render(
                 [

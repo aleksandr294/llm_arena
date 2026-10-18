@@ -1,8 +1,13 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from pydantic import SecretStr
 
 from components.core.config import SettingsSchema
+from components.third_party.llm.enums import ProviderName
+from components.third_party.llm.exceptions import (
+    ProviderNotConfiguredError,
+    UnsupportedProviderError,
+)
 from components.third_party.llm.providers.anthropic import AnthropicProvider
 from components.third_party.llm.providers.base import BaseLLMProvider
 from components.third_party.llm.providers.openai import OpenAIProvider
@@ -10,37 +15,24 @@ from components.third_party.llm.schemas import (
     LLMRequestSchema,
     LLMResponseSchema,
     ModelTargetSchema,
-    ProviderName,
 )
 
-
-class UnsupportedProviderError(Exception):
-    """The target names a provider that has no adapter."""
-
-
-class ProviderNotConfiguredError(Exception):
-    """The provider's API key setting is missing or blank. The message
-    names the setting only, never a value."""
-
-    def __init__(self, provider: ProviderName, setting: str) -> None:
-        self.provider = provider
-        self.setting = setting
-        super().__init__(
-            f"Provider '{provider.value}' is not configured: " f"set {setting}"
-        )
-
-
+ProviderFactory = tuple[str, Callable[[str], BaseLLMProvider]]
 # provider -> (settings attribute holding the key, adapter factory)
-_REGISTRY: dict[ProviderName, tuple[str, Callable[[str], BaseLLMProvider]]] = {
-    ProviderName.OPENAI: (
-        "openai_api_key",
-        lambda key: OpenAIProvider(api_key=key),
-    ),
-    ProviderName.ANTHROPIC: (
-        "anthropic_api_key",
-        lambda key: AnthropicProvider(api_key=key),
-    ),
-}
+ProviderFactories = Mapping[ProviderName, ProviderFactory]
+
+
+def default_provider_factories() -> ProviderFactories:
+    return {
+        ProviderName.OPENAI: (
+            "openai_api_key",
+            lambda key: OpenAIProvider(api_key=key),
+        ),
+        ProviderName.ANTHROPIC: (
+            "anthropic_api_key",
+            lambda key: AnthropicProvider(api_key=key),
+        ),
+    }
 
 
 class LLMService:
@@ -48,15 +40,24 @@ class LLMService:
     created lazily and cached on the instance; there is no shared state
     between instances."""
 
-    def __init__(self, settings: SettingsSchema) -> None:
+    def __init__(
+        self,
+        settings: SettingsSchema,
+        provider_factories: ProviderFactories | None = None,
+    ) -> None:
         self._settings = settings
+        self._factories = (
+            default_provider_factories()
+            if provider_factories is None
+            else provider_factories
+        )
         self._providers: dict[ProviderName, BaseLLMProvider] = {}
 
     def _get_provider(self, name: ProviderName) -> BaseLLMProvider:
         provider = self._providers.get(name)
         if provider is not None:
             return provider
-        entry = _REGISTRY.get(name)
+        entry = self._factories.get(name)
         if entry is None:
             raise UnsupportedProviderError(f"Unsupported provider: {name!s}")
         setting, factory = entry

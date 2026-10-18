@@ -5,6 +5,7 @@ Integration tests: need PostgreSQL (``DATABASE_URL``)."""
 import logging
 import uuid
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 import pytest
@@ -15,6 +16,7 @@ from sqlalchemy import select, update
 from api.v1.endpoints import evaluations as evaluations_api
 from api.v1.endpoints import experiments as experiments_api
 from api.v1.endpoints import metrics as metrics_api
+from components.core.database import session_scope
 from components.datasets.models import TestCase
 from components.experiments.models import Experiment, ExperimentResult
 from components.users.models import User
@@ -97,8 +99,9 @@ async def world(
     app.dependency_overrides[experiments_api.get_llm_service] = (
         FakeLLM().as_service
     )
-    for module in (evaluations_api, metrics_api):
-        app.dependency_overrides[module.get_factory] = lambda: session_factory
+    app.dependency_overrides[metrics_api.get_session_scope] = lambda: partial(
+        session_scope, session_factory
+    )
     app.dependency_overrides[metrics_api.get_pricing_file] = lambda: None
     experiment_id = await seed(
         session_factory,

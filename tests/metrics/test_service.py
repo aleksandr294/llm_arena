@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.experiments.service import ExperimentNotFoundError
+from components.experiments.exceptions import ExperimentNotFoundError
+from components.metrics.dependencies import build_metrics_service
 from components.metrics.schemas import ComparisonSchema
-from components.metrics.service import MetricsService
 from tests.access import ROOT
 from tests.metrics.helpers import Row, seed
 
@@ -46,7 +46,7 @@ async def _comparison(
     factory: Factory, experiment_id: uuid.UUID, pricing: str | None = None
 ) -> ComparisonSchema:
     async with factory() as session:
-        return await MetricsService(session, pricing).comparison(
+        return await build_metrics_service(session, pricing).comparison(
             ROOT, experiment_id
         )
 
@@ -58,7 +58,9 @@ async def test_summary_mixed_statuses(session_factory: Factory) -> None:
     ]
     experiment_id = await seed(session_factory, rows)
     async with session_factory() as session:
-        summary = await MetricsService(session).summary(ROOT, experiment_id)
+        summary = await build_metrics_service(session).summary(
+            ROOT, experiment_id
+        )
     assert summary.counts.succeeded == 3
     assert summary.counts.failed == 1
     assert summary.counts.pending == 2
@@ -72,7 +74,9 @@ async def test_summary_finished(session_factory: Factory) -> None:
         session_factory, [Row(1), Row(2, status="failed")]
     )
     async with session_factory() as session:
-        summary = await MetricsService(session).summary(ROOT, experiment_id)
+        summary = await build_metrics_service(session).summary(
+            ROOT, experiment_id
+        )
     assert summary.finished is True
 
 
@@ -262,7 +266,7 @@ async def test_cases_view_without_and_with_responses(
         session_factory, rows, models=("m1", "m2"), evaluators=("a",)
     )
     async with session_factory() as session:
-        service = MetricsService(session)
+        service = build_metrics_service(session)
         page = await service.cases(ROOT, experiment_id, limit=2, offset=0)
         assert (page.total, page.limit, page.offset) == (3, 2, 0)
         assert [c.case_position for c in page.items] == [1, 2]
@@ -285,7 +289,7 @@ async def test_cases_view_without_and_with_responses(
 
 async def test_unknown_experiment(session_factory: Factory) -> None:
     async with session_factory() as session:
-        service = MetricsService(session)
+        service = build_metrics_service(session)
         missing = uuid.uuid4()
         with pytest.raises(ExperimentNotFoundError):
             await service.summary(ROOT, missing)

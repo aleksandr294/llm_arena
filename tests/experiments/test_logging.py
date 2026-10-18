@@ -12,11 +12,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.experiments import get_enqueue, get_llm_service
-from components.core.access import Principal
-from components.core.database import get_session
+from components.core.database import get_session, session_scope
+from components.core.schemas import Principal
 from components.experiments.runner import ExperimentRunner
-from components.third_party.llm.providers.base import LLMProviderError
-from components.third_party.llm.schemas import LLMErrorKind, ProviderName
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
+from components.third_party.llm.exceptions import LLMProviderError
 from tests.access import Actors
 from tests.experiments.helpers import (
     Enqueued,
@@ -24,6 +24,7 @@ from tests.experiments.helpers import (
     FakeLLM,
     make_dataset,
     response,
+    scope_of,
 )
 
 pytestmark = pytest.mark.integration
@@ -43,13 +44,8 @@ def _overrides(
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
 ) -> None:
     async def session_override() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except BaseException:
-                await session.rollback()
-                raise
+        async with session_scope(session_factory) as session:
+            yield session
 
     app.dependency_overrides[get_session] = session_override
 
@@ -114,7 +110,7 @@ async def test_no_sentinel_in_logs_or_stored_errors(
     experiment_id = created.json()["id"]
     await client.post(f"{URL}/{experiment_id}/start")
     runner = ExperimentRunner(
-        session_factory, llm.as_service(), 4, jitter=lambda: 0.0
+        scope_of(session_factory), llm.as_service(), 4, jitter=lambda: 0.0
     )
     for result_id in enqueued.flat:
         await runner.run(result_id)

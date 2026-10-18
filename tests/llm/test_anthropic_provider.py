@@ -6,16 +6,13 @@ import anthropic
 import httpx2
 import pytest
 
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
+from components.third_party.llm.exceptions import LLMProviderError
 from components.third_party.llm.providers.anthropic import (
     DEFAULT_MAX_TOKENS,
     AnthropicProvider,
 )
-from components.third_party.llm.providers.base import LLMProviderError
-from components.third_party.llm.schemas import (
-    LLMErrorKind,
-    LLMRequestSchema,
-    ProviderName,
-)
+from components.third_party.llm.schemas import LLMRequestSchema
 
 REQUEST = LLMRequestSchema(model="claude-test", prompt="SECRET-PROMPT")
 HTTP_REQUEST = httpx2.Request("POST", "https://example.invalid/v1")

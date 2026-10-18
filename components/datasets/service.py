@@ -4,7 +4,9 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from components.core.access import Principal, require_organization
+from components.core.access import require_organization
+from components.core.schemas import Principal
+from components.datasets.exceptions import DatasetNotFoundError
 from components.datasets.models import Dataset, TestCase
 from components.datasets.repository import (
     DatasetRepository,
@@ -14,12 +16,6 @@ from components.datasets.schemas import (
     DatasetCreateSchema,
     TestCaseCreateSchema,
 )
-
-
-class DatasetNotFoundError(Exception):
-    def __init__(self, dataset_id: uuid.UUID) -> None:
-        super().__init__(f"Dataset {dataset_id} not found")
-        self.dataset_id = dataset_id
 
 
 class DatasetService:

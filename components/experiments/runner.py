@@ -1,9 +1,12 @@
 """Executes one experiment result.
 
-All state lives in database rows: the claim is committed before the model
-call, no transaction is open during the call, and the outcome is written
-conditionally. Logs carry ids, status, attempt and error kind only, never
-prompts, responses, keys or provider messages.
+All state lives in database rows. A result is run as three atomic
+operations, each in its own ``scope()`` session and transaction: the claim
+(committed before the model call so concurrent claimers see it), the model
+call with no session and no transaction open, and the conditional write of
+the outcome together with the experiment finalization. Logs carry ids,
+status, attempt and error kind only, never prompts, responses, keys or
+provider messages.
 """
 
 import asyncio
@@ -16,10 +19,10 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.experiments.logic import backoff_delay
-from components.experiments.models import Experiment, ResultStatus
+from components.core.database import SessionScope
+from components.experiments.enums import ResultStatus
+from components.experiments.models import Experiment
 from components.experiments.repository import (
     LEASE_SECONDS,
     ExperimentRepository,
@@ -27,17 +30,18 @@ from components.experiments.repository import (
     finalize_experiment,
 )
 from components.experiments.schemas import ExperimentConfigSchema
-from components.third_party.llm.providers.base import LLMProviderError
-from components.third_party.llm.schemas import (
-    LLMResponseSchema,
-    ModelTargetSchema,
-    ProviderName,
-)
-from components.third_party.llm.service import (
-    LLMService,
+from components.experiments.utils import backoff_delay
+from components.third_party.llm.enums import ProviderName
+from components.third_party.llm.exceptions import (
+    LLMProviderError,
     ProviderNotConfiguredError,
     UnsupportedProviderError,
 )
+from components.third_party.llm.schemas import (
+    LLMResponseSchema,
+    ModelTargetSchema,
+)
+from components.third_party.llm.service import LLMService
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +91,7 @@ def _default_jitter() -> float:
 class ExperimentRunner:
     def __init__(
         self,
-        session_factory: async_sessionmaker[AsyncSession],
+        scope: SessionScope,
         llm_service: LLMService,
         max_concurrency: int = 4,
         *,
@@ -98,7 +102,7 @@ class ExperimentRunner:
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least 1")
-        self._factory = session_factory
+        self._scope = scope
         self._llm = llm_service
         self._max_concurrency = max_concurrency
         self._lease_seconds = lease_seconds
@@ -125,7 +129,7 @@ class ExperimentRunner:
         await self._persist_safely(result_id, work, outcome)
 
     async def _claim(self, result_id: uuid.UUID) -> _Work | None:
-        async with self._factory() as session:
+        async with self._scope() as session:
             claimed = await ExperimentResultRepository(session).claim(
                 result_id, self._lease_seconds
             )
@@ -148,8 +152,8 @@ class ExperimentRunner:
                 attempts=claimed.attempts,
                 claimed_started_at=claimed.started_at,
             )
-            # Committed before the model call so concurrent claimers see it.
-            await session.commit()
+            # The scope commits on exit, before the model call, so
+            # concurrent claimers see the claim.
         logger.info("result %s claimed (attempt %d)", result_id, work.attempts)
         return work
 
@@ -297,7 +301,7 @@ class ExperimentRunner:
         outcome: _Outcome,
     ) -> bool:
         """Returns whether the outcome was stored (False: stale write)."""
-        async with self._factory() as session:
+        async with self._scope() as session:
             experiments = ExperimentRepository(session)
             results = ExperimentResultRepository(session)
             # Experiment lock first, like every other writer.
@@ -312,7 +316,7 @@ class ExperimentRunner:
             )
             if written and experiment is not None:
                 await finalize_experiment(experiment, results)
-            await session.commit()
+            # The scope commits the outcome and the finalization together.
         logger.info(
             "result %s %s (stored=%s, error_kind=%s)",
             result_id,

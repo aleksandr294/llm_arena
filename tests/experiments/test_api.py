@@ -12,11 +12,11 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.experiments import get_enqueue, get_llm_service
-from components.core.access import Principal
-from components.core.database import get_session
+from components.core.database import get_session, session_scope
+from components.core.schemas import Principal
 from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.runner import ExperimentRunner
-from components.third_party.llm.schemas import LLMErrorKind, ProviderName
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
 from tests.access import Actors
 from tests.experiments.helpers import (
     Enqueued,
@@ -24,6 +24,7 @@ from tests.experiments.helpers import (
     FakeLLM,
     make_dataset,
     provider_error,
+    scope_of,
 )
 
 pytestmark = pytest.mark.integration
@@ -60,14 +61,8 @@ def _overrides(
     enqueued: Enqueued,
 ) -> None:
     async def session_override() -> AsyncIterator[AsyncSession]:
-        # Same unit-of-work semantics as get_session.
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except BaseException:
-                await session.rollback()
-                raise
+        async with session_scope(session_factory) as session:
+            yield session
 
     app.dependency_overrides[get_session] = session_override
     app.dependency_overrides[get_llm_service] = llm.as_service
@@ -95,7 +90,9 @@ async def _create(
 
 
 async def _run_all(factory: Factory, llm: FakeLLM, enqueued: Enqueued) -> None:
-    runner = ExperimentRunner(factory, llm.as_service(), 4, jitter=lambda: 0.0)
+    runner = ExperimentRunner(
+        scope_of(factory), llm.as_service(), 4, jitter=lambda: 0.0
+    )
     for result_id in enqueued.flat:
         await runner.run(result_id)
     enqueued.batches.clear()

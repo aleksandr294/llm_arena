@@ -11,14 +11,15 @@ import openai
 import pytest
 
 from components.core.config import SettingsSchema
-from components.third_party.llm.providers import anthropic as anthropic_mod
-from components.third_party.llm.providers import openai as openai_mod
-from components.third_party.llm.providers.base import LLMProviderError
-from components.third_party.llm.schemas import ModelTargetSchema, ProviderName
-from components.third_party.llm.service import (
-    LLMService,
+from components.third_party.llm.enums import ProviderName
+from components.third_party.llm.exceptions import (
+    LLMProviderError,
     ProviderNotConfiguredError,
 )
+from components.third_party.llm.providers import anthropic as anthropic_mod
+from components.third_party.llm.providers import openai as openai_mod
+from components.third_party.llm.schemas import ModelTargetSchema
+from components.third_party.llm.service import LLMService
 
 KEY = "sk-SENTINEL-KEY-123"
 PROMPT = "SENTINEL-PROMPT-456"

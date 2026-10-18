@@ -1,6 +1,6 @@
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -13,7 +13,8 @@ from pydantic import (
     model_validator,
 )
 
-from components.datasets.schemas import _reject_nul
+from components.core.utils import reject_nul
+from components.evaluation.enums import OutcomeStatus
 
 MAX_EVALUATORS = 20
 MAX_VALUES = 20
@@ -24,13 +25,6 @@ PATH_MAX = 200
 JsonType = Literal[
     "string", "number", "integer", "boolean", "array", "object", "null"
 ]
-
-
-class OutcomeStatus(StrEnum):
-    PASSED = "passed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    ERROR = "error"
 
 
 class EvaluationOutcome(BaseModel):
@@ -44,7 +38,7 @@ class EvaluationOutcome(BaseModel):
 
 
 def _valid_path(value: str) -> str:
-    _reject_nul(value)
+    reject_nul(value)
     if any(not part for part in value.split(".")):
         raise ValueError("must be dot-separated non-empty keys")
     return value
@@ -53,12 +47,12 @@ def _valid_path(value: str) -> str:
 EvaluatorIdStr = Annotated[
     str,
     StringConstraints(min_length=1, max_length=64),
-    AfterValidator(_reject_nul),
+    AfterValidator(reject_nul),
 ]
 ValueStr = Annotated[
     str,
     StringConstraints(min_length=1, max_length=VALUE_MAX),
-    AfterValidator(_reject_nul),
+    AfterValidator(reject_nul),
 ]
 FieldPathStr = Annotated[
     str,
@@ -240,3 +234,15 @@ class EvaluationEnqueueSchema(BaseModel):
     enqueued: int
     # Results still lacking an evaluation after this batch; call again.
     remaining: int
+
+
+@dataclass(frozen=True)
+class EvaluationInput:
+    """Everything the evaluate task needs, read in one query."""
+
+    result_id: uuid.UUID
+    experiment_id: uuid.UUID
+    status: str
+    response_text: str | None
+    expected_output: str | None
+    evaluator_config: dict[str, Any]

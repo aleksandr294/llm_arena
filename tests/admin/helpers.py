@@ -1,54 +1,16 @@
-import os
+"""Plain helpers for the admin tests (not fixtures): the seeded world."""
+
 import uuid
-from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
-from typing import cast
 
-import pytest
-from sqlalchemy import Table, select, update
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.auth.security import hash_password
-from components.core.access import Principal, Role
-from components.core.database import Base, create_engine
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.evaluation.models import EvaluationResult
 from components.experiments.models import Experiment, ExperimentResult
-from components.users.models import User
-from tests.access import (
-    ACCESS_MODELS,
-    PASSWORD,
-    seed_organization,
-    seed_principal,
-)
-from tests.admin.panel_process import Panel
-
-_MODELS = (
-    *ACCESS_MODELS,
-    Dataset,
-    TestCase,
-    Experiment,
-    ExperimentResult,
-    EvaluationResult,
-)
-
-
-@pytest.fixture
-async def engine() -> AsyncIterator[AsyncEngine]:
-    """Engine on ``DATABASE_URL`` with fresh tables per test."""
-    engine = create_engine(os.environ["DATABASE_URL"])
-    tables = [cast(Table, m.__table__) for m in _MODELS]
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all, tables=tables)
-        await conn.run_sync(Base.metadata.create_all, tables=tables)
-    yield engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all, tables=tables)
-    await engine.dispose()
+from tests.access import seed_organization, seed_principal
 
 
 @dataclass
@@ -70,9 +32,10 @@ class World:
     evaluations: dict[str, uuid.UUID]
 
 
-@pytest.fixture
-async def world(engine: AsyncEngine) -> World:
-    factory = async_sessionmaker(engine, expire_on_commit=False)
+async def seed_world(
+    factory: async_sessionmaker[AsyncSession],
+) -> World:
+    """Seed two organizations with users, datasets and experiments."""
     async with factory() as session:
         org_a = await seed_organization(session)
         org_b = await seed_organization(session)
@@ -165,28 +128,3 @@ async def _seed_data(
         session.add(evaluation)
         await session.flush()
         world.evaluations[name] = evaluation.id
-
-
-@pytest.fixture
-async def emails(engine: AsyncEngine, world: World) -> dict[str, str]:
-    """Sign-in emails by principal name; every user gets ``PASSWORD``."""
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
-        await session.execute(
-            update(User).values(password_hash=await hash_password(PASSWORD))
-        )
-        await session.commit()
-        rows = (await session.execute(select(User.id, User.email))).all()
-    by_id = {row.id: row.email for row in rows}
-    return {
-        name: by_id[principal.user_id]
-        for name, principal in world.principals.items()
-    }
-
-
-@pytest.fixture
-def panel(emails: dict[str, str]) -> Iterator[Panel]:
-    """The panel mounted in a child process on the test database."""
-    running = Panel()
-    yield running
-    running.close()

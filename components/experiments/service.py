@@ -4,30 +4,33 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from components.core.access import Principal, require_organization
+from components.core.access import require_organization
+from components.core.database import commit, on_commit
+from components.core.schemas import Principal
+from components.datasets.exceptions import DatasetNotFoundError
 from components.datasets.repository import (
     DatasetRepository,
     TestCaseRepository,
 )
-from components.datasets.service import DatasetNotFoundError
-from components.experiments.logic import render_prompt
-from components.experiments.models import (
-    Experiment,
-    ExperimentResult,
-    ExperimentStatus,
-    ResultStatus,
+from components.experiments.enums import ExperimentStatus, ResultStatus
+from components.experiments.exceptions import (
+    ExperimentNotFoundError,
+    ExperimentValidationError,
+    InvalidTransitionError,
 )
+from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.repository import (
     ExperimentRepository,
     ExperimentResultRepository,
     finalize_experiment,
 )
 from components.experiments.schemas import ExperimentCreateSchema
-from components.third_party.llm.service import (
-    LLMService,
+from components.experiments.utils import render_prompt
+from components.third_party.llm.exceptions import (
     ProviderNotConfiguredError,
     UnsupportedProviderError,
 )
+from components.third_party.llm.service import LLMService
 
 MAX_RESULTS = 10_000
 
@@ -47,36 +50,13 @@ _RETRYABLE_STATUSES = {
 }
 
 
-class ExperimentNotFoundError(Exception):
-    def __init__(self, experiment_id: uuid.UUID) -> None:
-        super().__init__(f"Experiment {experiment_id} not found")
-        self.experiment_id = experiment_id
-
-
-class InvalidTransitionError(Exception):
-    def __init__(self, experiment_id: uuid.UUID, status: str, action: str):
-        super().__init__(f"Cannot {action} an experiment that is {status}")
-        self.experiment_id = experiment_id
-        self.status = status
-        self.action = action
-
-
-class ExperimentValidationError(Exception):
-    """Input that passes schema validation but cannot be accepted (422).
-    ``field`` names the offending request field; the message never contains
-    secret values."""
-
-    def __init__(self, field: str, message: str) -> None:
-        super().__init__(message)
-        self.field = field
-        self.message = message
-
-
 class ExperimentService:
-    """API-side orchestration. Uses the caller's session; it commits only in
-    ``start`` and ``retry_failed``, where the state change must be durable
-    before tasks are enqueued (a worker must never see an uncommitted
-    experiment, and a rolled-back request must not leave orphan tasks)."""
+    """API-side orchestration. Uses the caller's session; the entry point
+    owns the transaction. ``start`` and ``retry_failed`` are the explicit
+    commit points: the state change must be durable before tasks are
+    enqueued (a worker must never see an uncommitted experiment, and a
+    rolled-back request must not leave orphan tasks), so they register the
+    enqueue with ``on_commit`` and commit."""
 
     def __init__(
         self,
@@ -237,9 +217,16 @@ class ExperimentService:
         return await self._commit_and_enqueue(ids)
 
     async def _commit_and_enqueue(self, ids: Sequence[uuid.UUID]) -> int:
-        await self.session.commit()
         if ids:
-            await self.enqueue(ids)
+
+            async def publish() -> None:
+                await self.enqueue(ids)
+
+            on_commit(self.session, publish)
+        # The single commit of the operation; the enqueue runs right after
+        # it, so a failed enqueue leaves committed pending results that a
+        # repeated start enqueues again.
+        await commit(self.session)
         return len(ids)
 
     async def get(

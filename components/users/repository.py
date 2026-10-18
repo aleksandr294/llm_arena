@@ -3,7 +3,7 @@ from collections.abc import Sequence
 
 from sqlalchemy import func, select, update
 
-from components.core.access import Role
+from components.core.enums import Role
 from components.core.repository import BaseRepository
 from components.users.models import User
 

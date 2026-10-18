@@ -12,14 +12,16 @@ from typing import Any
 from fastadmin import register
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from admin.core import ReadOnlyScopedAdmin, SessionUser
+from admin.core import ReadOnlyScopedAdmin
+from admin.schemas import SessionUser
 from components.auth.security import (
     PASSWORD_MAX_LENGTH,
     verify_dummy_password,
     verify_password,
 )
-from components.core.access import Principal, Role
-from components.core.database import get_session_factory
+from components.core.database import session_scope
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.organizations.repository import OrganizationRepository
 from components.users.models import User
 from components.users.repository import UserRepository
@@ -72,7 +74,7 @@ class UserAdmin(ReadOnlyScopedAdmin):
         neither whether the email exists nor why sign-in failed."""
         # An unscoped, short session: nobody is signed in yet, and the
         # connection is released before the slow Argon2id verification.
-        async with get_session_factory()() as session:
+        async with session_scope() as session:
             user = await UserRepository(session).get_by_email(username.strip())
             password_hash = user.password_hash if user is not None else None
             principal = await _active_principal(session, user)
@@ -132,7 +134,7 @@ class UserAdmin(ReadOnlyScopedAdmin):
             user_id = id if isinstance(id, uuid.UUID) else uuid.UUID(str(id))
         except ValueError:
             return None
-        async with get_session_factory()() as session:
+        async with session_scope() as session:
             user = await UserRepository(session).get(user_id)
             principal = await _active_principal(session, user)
         # Never the bare principal: see ``SessionUser``.

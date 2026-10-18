@@ -5,14 +5,12 @@ from typing import Any
 
 from sqlalchemy import func, select, update
 
-from components.core.access import Principal, scope_clause
+from components.core.access import scope_clause
 from components.core.repository import BaseRepository
-from components.experiments.logic import derive_final_status
-from components.experiments.models import (
-    Experiment,
-    ExperimentResult,
-    ResultStatus,
-)
+from components.core.schemas import Principal
+from components.experiments.enums import ResultStatus
+from components.experiments.models import Experiment, ExperimentResult
+from components.experiments.utils import derive_final_status
 
 # A result "running" for longer than this is assumed to belong to a crashed
 # worker and may be claimed again. Must exceed max attempts (5) * timeout

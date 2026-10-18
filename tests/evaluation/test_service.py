@@ -11,10 +11,11 @@ from sqlalchemy import select
 from components.evaluation import evaluators
 from components.evaluation.models import EvaluationResult
 from components.evaluation.repository import EvaluationRepository
-from components.evaluation.service import EvaluationService
-from components.experiments.models import ExperimentResult, ResultStatus
-from components.experiments.service import ExperimentNotFoundError
+from components.experiments.enums import ResultStatus
+from components.experiments.exceptions import ExperimentNotFoundError
+from components.experiments.models import ExperimentResult
 from tests.access import ROOT
+from tests.evaluation.helpers import ScopedEvaluation
 from tests.evaluation.test_repository import Factory, _setup
 
 pytestmark = pytest.mark.integration
@@ -48,7 +49,7 @@ async def _rows(factory: Factory) -> list[EvaluationResult]:
 
 async def test_two_evaluators_store_two_rows(session_factory: Factory) -> None:
     ids = await _make(session_factory)
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     assert await service.evaluate_result(ids[1]) == 2
     rows = await _rows(session_factory)
     assert [(r.evaluator_id, r.status) for r in rows] == [
@@ -64,7 +65,7 @@ async def test_missing_expected_output_is_skipped(
     session_factory: Factory,
 ) -> None:
     ids = await _make(session_factory)
-    await EvaluationService(session_factory).evaluate_result(ids[0])
+    await ScopedEvaluation(session_factory).evaluate_result(ids[0])
     statuses = {r.evaluator_id: r.status for r in await _rows(session_factory)}
     assert statuses["exact"] == "skipped"
 
@@ -73,12 +74,12 @@ async def test_failed_generation_is_not_evaluated(
     session_factory: Factory,
 ) -> None:
     ids = await _make(session_factory)
-    assert await EvaluationService(session_factory).evaluate_result(ids[2]) == 0
+    assert await ScopedEvaluation(session_factory).evaluate_result(ids[2]) == 0
     assert await _rows(session_factory) == []
 
 
 async def test_unknown_result_is_ignored(session_factory: Factory) -> None:
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     assert await service.evaluate_result(uuid.uuid4()) == 0
 
 
@@ -86,7 +87,7 @@ async def test_duplicate_delivery_keeps_one_row_each(
     session_factory: Factory,
 ) -> None:
     ids = await _make(session_factory)
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     assert await service.evaluate_result(ids[1]) == 2
     assert await service.evaluate_result(ids[1]) == 0
     assert len(await _rows(session_factory)) == 2
@@ -101,7 +102,7 @@ async def test_evaluator_exception_is_stored_as_error(
         raise RuntimeError("secret r1 text")
 
     monkeypatch.setattr(evaluators.ContainsEvaluator, "evaluate", boom)
-    await EvaluationService(session_factory).evaluate_result(ids[1])
+    await ScopedEvaluation(session_factory).evaluate_result(ids[1])
     rows = {r.evaluator_id: r for r in await _rows(session_factory)}
     assert rows["has_r"].status == "error"
     assert rows["has_r"].details == {
@@ -122,8 +123,7 @@ async def test_unparsable_or_empty_config_means_no_evaluation(
     ids = await _make(session_factory, config=config)
     with caplog.at_level(logging.WARNING):
         assert (
-            await EvaluationService(session_factory).evaluate_result(ids[1])
-            == 0
+            await ScopedEvaluation(session_factory).evaluate_result(ids[1]) == 0
         )
     assert await _rows(session_factory) == []
     if config:
@@ -139,7 +139,7 @@ async def test_generation_state_is_unchanged(session_factory: Factory) -> None:
                 select(ExperimentResult).order_by(ExperimentResult.id)
             )
         ]
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     for result_id in ids:
         await service.evaluate_result(result_id)
     async with session_factory() as s:
@@ -155,7 +155,7 @@ async def test_generation_state_is_unchanged(session_factory: Factory) -> None:
 
 async def test_backfill_and_summary(session_factory: Factory) -> None:
     ids = await _make(session_factory)
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     async with session_factory() as s:
         experiment_id = (await s.get(ExperimentResult, ids[0])).experiment_id  # type: ignore[union-attr]
 
@@ -185,7 +185,7 @@ async def test_backfill_without_evaluators_is_empty(
     session_factory: Factory,
 ) -> None:
     ids = await _make(session_factory, config={})
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     async with session_factory() as s:
         experiment_id = (await s.get(ExperimentResult, ids[0])).experiment_id  # type: ignore[union-attr]
     assert await service.backfill(ROOT, experiment_id) == ([], 0)
@@ -195,7 +195,7 @@ async def test_backfill_without_evaluators_is_empty(
 
 
 async def test_unknown_experiment_raises(session_factory: Factory) -> None:
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     with pytest.raises(ExperimentNotFoundError):
         await service.backfill(ROOT, uuid.uuid4())
     with pytest.raises(ExperimentNotFoundError):
@@ -206,7 +206,7 @@ async def test_backfill_is_capped_and_reports_remaining(
     session_factory: Factory,
 ) -> None:
     ids = await _make(session_factory)
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     async with session_factory() as s:
         experiment_id = (await s.get(ExperimentResult, ids[0])).experiment_id  # type: ignore[union-attr]
     assert await service.backfill(ROOT, experiment_id, limit=1) == ([ids[0]], 1)
@@ -225,7 +225,7 @@ async def test_summary_counts_without_listing_ids(
     monkeypatch.setattr(
         EvaluationRepository, "list_unevaluated_result_ids", boom
     )
-    summary = await EvaluationService(session_factory).summary(
+    summary = await ScopedEvaluation(session_factory).summary(
         ROOT, experiment_id
     )
     assert summary.unevaluated_results == 2
@@ -240,7 +240,7 @@ async def test_succeeded_result_without_response_is_stored_as_error(
         assert result is not None
         result.response_text = None
         await s.commit()
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     assert await service.evaluate_result(ids[0]) == 2
     rows = await _rows(session_factory)
     assert [(r.status, r.details) for r in rows] == [
@@ -262,7 +262,7 @@ async def test_concurrent_evaluation_stores_one_row_per_evaluator(
     session_factory: Factory,
 ) -> None:
     ids = await _make(session_factory)
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     inserted = await asyncio.gather(
         service.evaluate_result(ids[1]), service.evaluate_result(ids[1])
     )

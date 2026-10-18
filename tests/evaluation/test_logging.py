@@ -12,15 +12,16 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from api.v1.endpoints.evaluations import get_enqueue, get_factory
-from components.core.access import Principal
+from api.v1.endpoints.evaluations import get_enqueue
+from components.core.schemas import Principal
 from components.datasets.models import TestCase
 from components.evaluation.evaluators import build_evaluator
 from components.evaluation.models import EvaluationResult
 from components.evaluation.schemas import parse_evaluator_config
-from components.evaluation.service import EvaluationService
-from components.experiments.models import ExperimentResult, ResultStatus
+from components.experiments.enums import ResultStatus
+from components.experiments.models import ExperimentResult
 from tests.access import Actors
+from tests.evaluation.helpers import ScopedEvaluation
 from tests.evaluation.test_repository import Factory, _setup
 from tests.experiments.helpers import Enqueued
 
@@ -57,7 +58,6 @@ def _overrides(
     app: FastAPI,
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
 ) -> None:
-    app.dependency_overrides[get_factory] = lambda: session_factory
     app.dependency_overrides[get_enqueue] = lambda: Enqueued()
 
 
@@ -100,7 +100,7 @@ async def test_sentinels_never_logged_or_stored(
 ) -> None:
     experiment_id, ids = await _seed(session_factory, owner)
     caplog.set_level(logging.DEBUG)
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     for result_id in ids:
         assert await service.evaluate_result(result_id) == 6
 
