@@ -6,9 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.v1.docs import errors
 from api.v1.utils import CreatedRangeSchema, get_created_range, get_principal
-from components.core.access import OrganizationRequiredError, Principal
 from components.core.config import get_settings
 from components.core.database import get_session
+from components.core.exceptions import OrganizationRequiredError
+from components.core.schemas import Principal
 from components.datasets.service import DatasetNotFoundError
 from components.experiments.models import ExperimentStatus, ResultStatus
 from components.experiments.schemas import (

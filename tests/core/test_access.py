@@ -4,13 +4,10 @@ import pytest
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.dialects import postgresql
 
-from components.core.access import (
-    OrganizationRequiredError,
-    Principal,
-    Role,
-    require_organization,
-    scope_clause,
-)
+from components.core.access import require_organization, scope_clause
+from components.core.enums import Role
+from components.core.exceptions import OrganizationRequiredError
+from components.core.schemas import Principal
 from components.datasets.models import Dataset
 from components.experiments.models import Experiment
 

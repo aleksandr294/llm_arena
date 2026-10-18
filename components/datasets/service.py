@@ -4,7 +4,8 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from components.core.access import Principal, require_organization
+from components.core.access import require_organization
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.datasets.repository import (
     DatasetRepository,

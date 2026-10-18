@@ -6,7 +6,8 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from components.core.access import OrganizationRequiredError, Principal
+from components.core.exceptions import OrganizationRequiredError
+from components.core.schemas import Principal
 from components.datasets.schemas import (
     DatasetCreateSchema,
     TestCaseCreateSchema,

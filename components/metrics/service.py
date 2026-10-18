@@ -10,7 +10,7 @@ from collections import defaultdict
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from components.core.access import Principal
+from components.core.schemas import Principal
 from components.evaluation.schemas import (
     EvaluatorConfigSchema,
     parse_evaluator_config,

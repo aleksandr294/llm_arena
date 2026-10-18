@@ -18,7 +18,7 @@ from typer.testing import CliRunner
 
 import cli
 from components.auth.models import RefreshToken
-from components.core.access import Role
+from components.core.enums import Role
 from components.users.models import User
 from tests.auth.conftest import PASSWORD, Factory, seed_user
 

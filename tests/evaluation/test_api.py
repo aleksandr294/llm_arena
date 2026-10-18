@@ -9,7 +9,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.endpoints.evaluations import get_enqueue, get_factory
-from components.core.access import Principal
+from components.core.schemas import Principal
 from components.evaluation import service as service_module
 from components.evaluation.repository import EvaluationRepository
 from components.evaluation.service import EvaluationService

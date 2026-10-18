@@ -23,9 +23,9 @@ import cli
 import main
 from api.app import create_app
 from components.auth.service import AuthService
-from components.core.access import Role
 from components.core.config import SettingsSchema
 from components.core.database import Base
+from components.core.enums import Role
 from components.users.models import User
 from tests.auth.conftest import MODELS
 

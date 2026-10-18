@@ -13,7 +13,7 @@ from pydantic import (
     model_validator,
 )
 
-from components.datasets.schemas import _reject_nul
+from components.core.utils import reject_nul
 
 MAX_EVALUATORS = 20
 MAX_VALUES = 20
@@ -44,7 +44,7 @@ class EvaluationOutcome(BaseModel):
 
 
 def _valid_path(value: str) -> str:
-    _reject_nul(value)
+    reject_nul(value)
     if any(not part for part in value.split(".")):
         raise ValueError("must be dot-separated non-empty keys")
     return value
@@ -53,12 +53,12 @@ def _valid_path(value: str) -> str:
 EvaluatorIdStr = Annotated[
     str,
     StringConstraints(min_length=1, max_length=64),
-    AfterValidator(_reject_nul),
+    AfterValidator(reject_nul),
 ]
 ValueStr = Annotated[
     str,
     StringConstraints(min_length=1, max_length=VALUE_MAX),
-    AfterValidator(_reject_nul),
+    AfterValidator(reject_nul),
 ]
 FieldPathStr = Annotated[
     str,

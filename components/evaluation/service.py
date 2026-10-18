@@ -11,7 +11,7 @@ import uuid
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.core.access import Principal
+from components.core.schemas import Principal
 from components.evaluation.evaluators import EVALUATORS, build_evaluator
 from components.evaluation.repository import EvaluationRepository
 from components.evaluation.schemas import (

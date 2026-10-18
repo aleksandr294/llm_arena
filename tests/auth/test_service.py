@@ -25,8 +25,8 @@ from components.auth.service import (
     TokenPair,
     ValidationResult,
 )
-from components.core.access import Role
 from components.core.config import SettingsSchema
+from components.core.enums import Role
 from components.organizations.models import Organization
 from components.users.models import User
 from components.users.repository import UserRepository

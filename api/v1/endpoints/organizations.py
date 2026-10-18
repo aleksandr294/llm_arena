@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.v1.docs import errors
 from api.v1.utils import get_principal
-from components.core.access import Principal, Role
 from components.core.database import get_session
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.organizations.schemas import (
     OrganizationCreateSchema,
     OrganizationPageSchema,

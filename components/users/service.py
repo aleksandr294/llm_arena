@@ -14,8 +14,9 @@ from components.auth.security import (
     validate_password_policy,
 )
 from components.auth.service import AuthService
-from components.core.access import Principal, Role
 from components.core.config import SettingsSchema
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.organizations.repository import OrganizationRepository
 from components.users.models import User
 from components.users.repository import UserRepository

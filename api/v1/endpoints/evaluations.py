@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.docs import errors
 from api.v1.utils import get_principal
-from components.core.access import Principal
 from components.core.database import get_session_factory
+from components.core.schemas import Principal
 from components.evaluation.schemas import (
     EvaluationEnqueueSchema,
     EvaluationPageSchema,

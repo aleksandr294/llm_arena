@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from sqlalchemy import Text, literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.core.access import Principal
+from components.core.schemas import Principal
 from components.evaluation.models import EvaluationResult
 from components.evaluation.schemas import parse_evaluator_config
 from components.experiments.models import ExperimentResult

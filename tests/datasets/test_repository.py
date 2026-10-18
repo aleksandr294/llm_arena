@@ -11,8 +11,9 @@ from sqlalchemy import Table, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.core.access import Principal, Role
 from components.core.database import Base, create_engine
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.datasets.repository import (
     DatasetRepository,

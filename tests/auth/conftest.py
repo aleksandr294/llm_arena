@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import (
 from api.v1.utils import get_settings_dependency
 from components.auth.models import RefreshToken
 from components.auth.security import hash_password
-from components.core.access import Role
 from components.core.config import SettingsSchema
 from components.core.database import Base, create_engine, get_session
+from components.core.enums import Role
 from components.organizations.models import Organization
 from components.organizations.repository import OrganizationRepository
 from components.users.models import User

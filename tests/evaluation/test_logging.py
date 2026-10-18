@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.endpoints.evaluations import get_enqueue, get_factory
-from components.core.access import Principal
+from components.core.schemas import Principal
 from components.datasets.models import TestCase
 from components.evaluation.evaluators import build_evaluator
 from components.evaluation.models import EvaluationResult

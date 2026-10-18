@@ -11,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 
-from components.core.schemas import reject_nul
+from components.core.utils import reject_nul
 
 OrganizationName = Annotated[
     str,

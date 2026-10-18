@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.core.access import Principal
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.evaluation.models import EvaluationResult
 from components.evaluation.repository import EvaluationRepository

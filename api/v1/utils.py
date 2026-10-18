@@ -9,9 +9,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.auth.service import AccessTokenRejectedError, AuthService
-from components.core.access import Principal
 from components.core.config import SettingsSchema, get_settings
 from components.core.database import get_session
+from components.core.schemas import Principal
 
 # auto_error=False: a missing or malformed header must answer 401 with a
 # Bearer challenge, not the default 403.

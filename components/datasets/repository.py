@@ -5,8 +5,9 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from components.core.access import Principal, scope_clause
+from components.core.access import scope_clause
 from components.core.repository import BaseRepository
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 
 _USE_SCOPED = "use the scoped method"

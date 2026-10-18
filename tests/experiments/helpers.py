@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.core.access import Principal
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.experiments.schemas import (
     ExperimentConfigSchema,

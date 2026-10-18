@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.core.access import Role
+from components.core.enums import Role
 from components.experiments.models import Experiment
 from components.experiments.service import ExperimentNotFoundError
 from components.metrics import export

@@ -7,7 +7,7 @@ from httpx import AsyncClient, Response
 from sqlalchemy import select
 
 from components.auth.models import RefreshToken
-from components.core.access import Role
+from components.core.enums import Role
 from components.users.models import User
 from tests.auth.conftest import (
     PASSWORD,

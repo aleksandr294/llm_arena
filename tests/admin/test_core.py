@@ -13,7 +13,8 @@ from admin.core import (
     SessionUser,
     scoped_sessionmaker,
 )
-from components.core.access import Principal, Role
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.evaluation.models import EvaluationResult
 from components.experiments.models import Experiment, ExperimentResult

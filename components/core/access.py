@@ -1,38 +1,11 @@
 import uuid
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any, cast
 
 from sqlalchemy import ColumnElement, false, true
 
-
-class Role(StrEnum):
-    """User roles. Staff own their data, admins manage an organization and
-    superadmins operate the platform (they belong to no organization)."""
-
-    STAFF = "staff"
-    ADMIN = "admin"
-    SUPERADMIN = "superadmin"
-
-
-@dataclass(frozen=True, slots=True)
-class Principal:
-    """The authenticated caller, resolved from the database on each request.
-    ``organization_id`` is ``None`` only for superadmins."""
-
-    user_id: uuid.UUID
-    organization_id: uuid.UUID | None
-    role: Role
-
-
-class OrganizationRequiredError(Exception):
-    """Creating data needs an organization, which superadmins do not have."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            "A superadmin has no organization and cannot own data; "
-            "use an organization account"
-        )
+from components.core.enums import Role
+from components.core.exceptions import OrganizationRequiredError
+from components.core.schemas import Principal
 
 
 def require_organization(principal: Principal) -> uuid.UUID:

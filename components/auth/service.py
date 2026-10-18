@@ -23,8 +23,9 @@ from components.auth.security import (
     verify_dummy_password,
     verify_password,
 )
-from components.core.access import Principal, Role
 from components.core.config import SettingsSchema
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.organizations.repository import OrganizationRepository
 from components.users.models import User
 from components.users.repository import UserRepository

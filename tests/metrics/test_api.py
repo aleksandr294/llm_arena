@@ -13,8 +13,8 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.metrics import get_factory, get_pricing_file
-from components.core.access import Principal
 from components.core.database import get_session
+from components.core.schemas import Principal
 from tests.access import Actors
 from tests.metrics.helpers import Row, seed
 

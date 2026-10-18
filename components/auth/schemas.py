@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from components.auth.security import PASSWORD_MAX_LENGTH
 from components.auth.service import RejectionReason
-from components.core.access import Role
+from components.core.enums import Role
 from components.core.schemas import NoNulStr
 
 # Bounds keep oversized inputs from reaching the password hasher.

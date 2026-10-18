@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from components.auth.security import hash_password
-from components.core.access import Principal, Role
 from components.core.database import Base, create_engine
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.evaluation.models import EvaluationResult
 from components.experiments.models import Experiment, ExperimentResult

@@ -20,7 +20,7 @@ from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from components.auth.security import hash_password
-from components.core.access import Role
+from components.core.enums import Role
 from components.users.models import User
 from components.users.repository import UserRepository
 from tests.access import PASSWORD

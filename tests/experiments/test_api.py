@@ -12,8 +12,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.experiments import get_enqueue, get_llm_service
-from components.core.access import Principal
 from components.core.database import get_session
+from components.core.schemas import Principal
 from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.runner import ExperimentRunner
 from components.third_party.llm.schemas import LLMErrorKind, ProviderName

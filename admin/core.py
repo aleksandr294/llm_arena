@@ -21,8 +21,10 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import ORMExecuteState, Session, with_loader_criteria
 
-from components.core.access import Principal, Role, scope_clause
+from components.core.access import scope_clause
 from components.core.database import get_engine
+from components.core.enums import Role
+from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.evaluation.models import EvaluationResult
 from components.experiments.models import Experiment, ExperimentResult

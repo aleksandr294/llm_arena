@@ -7,8 +7,8 @@ from typing import Any
 from fastadmin import AdminApiException, register
 
 from admin.core import ReadOnlyScopedAdmin, principal_of
-from components.core.access import Role
 from components.core.database import get_session_factory
+from components.core.enums import Role
 from components.organizations.models import Organization
 from components.organizations.service import (
     OrganizationNotFoundError,
