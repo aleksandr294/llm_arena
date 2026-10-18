@@ -31,6 +31,8 @@ ruff = "*"
 black = "*"
 mypy = "*"
 pre-commit = "*"
+bandit = "^1.9.4"
+pip-audit = "^2.10.1"
 
 [build-system]
 requires = ["poetry-core"]
@@ -46,7 +48,16 @@ target-version = "py312"
 extend-exclude = ["migrations/versions"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "ASYNC"]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "PT", "RUF"]
+# PT018 (split composite assertions) is style-only and would rewrite ~100
+# deliberate multi-condition asserts in tests.
+ignore = ["PT018"]
+
+[tool.ruff.lint.per-file-ignores]
+# The async context manager under test is the subject of these raises blocks.
+"tests/core/test_session_scope.py" = ["PT012"]
+# Non-ASCII Cyrillic text is the test input (Unicode preservation).
+"tests/datasets/test_api.py" = ["RUF001"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -59,6 +70,10 @@ explicit_package_bases = true
 [[tool.mypy.overrides]]
 module = ["fastadmin", "fastadmin.*"]
 ignore_missing_imports = true
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", ".mypy_cache", ".ruff_cache", ".pytest_cache"]
+# Targets and the severity threshold (-ll) are given on the command line.
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
