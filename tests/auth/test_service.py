@@ -3,6 +3,7 @@
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 from argon2 import PasswordHasher
@@ -497,3 +498,50 @@ async def test_validate_uses_database_role(
     token = (await api.login(user.email)).access_token
     await _set_user(session_factory, user.user_id, role="admin")
     assert (await api.validate(token)).role is Role.ADMIN
+
+
+class _RecordingAuth:
+    """Stands in for ``AuthService``; records ``revoke_all_sessions``."""
+
+    def __init__(self) -> None:
+        self.revoked: list[uuid.UUID] = []
+
+    async def revoke_all_sessions(self, user_id: uuid.UUID) -> int:
+        self.revoked.append(user_id)
+        return 0
+
+
+@pytest.mark.parametrize(
+    "change", [{"is_active": False}, {"password": "a brand new password"}]
+)
+async def test_user_service_revokes_through_the_injected_auth(
+    session_factory: Factory, change: dict[str, object]
+) -> None:
+    from components.auth.service import AuthService
+    from components.core.schemas import Principal
+    from components.users.dependencies import build_user_service
+
+    root = Principal(uuid.uuid4(), None, Role.SUPERADMIN)
+    target = await seed_user(session_factory, "target@example.com")
+    auth = _RecordingAuth()
+    async with session_scope(session_factory) as session:
+        service = build_user_service(session, cast(AuthService, auth))
+        assert cast(object, service.auth) is auth
+        await service.update_user(root, target.user_id, **change)  # type: ignore[arg-type]
+    assert auth.revoked == [target.user_id]
+
+
+async def test_user_service_does_not_revoke_for_other_changes(
+    session_factory: Factory,
+) -> None:
+    from components.auth.service import AuthService
+    from components.core.schemas import Principal
+    from components.users.dependencies import build_user_service
+
+    root = Principal(uuid.uuid4(), None, Role.SUPERADMIN)
+    target = await seed_user(session_factory, "target@example.com")
+    auth = _RecordingAuth()
+    async with session_scope(session_factory) as session:
+        service = build_user_service(session, cast(AuthService, auth))
+        await service.update_user(root, target.user_id, role=Role.ADMIN)
+    assert auth.revoked == []

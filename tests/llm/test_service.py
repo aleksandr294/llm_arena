@@ -203,3 +203,65 @@ def test_ensure_provider_ready_checks_key_without_network() -> None:
     with pytest.raises(ProviderNotConfiguredError) as exc:
         blank.ensure_provider_ready(ProviderName.OPENAI)
     assert "OPENAI_API_KEY" in str(exc.value)
+
+
+def _recording_factories() -> tuple[dict[str, list[str]], Any]:
+    """One factory per provider, each recording its own calls."""
+    calls: dict[str, list[str]] = {"openai": [], "anthropic": []}
+
+    def make(name: ProviderName) -> Any:
+        def factory(key: str) -> FakeProvider:
+            calls[name.value].append(key)
+            return FakeProvider(name, key)
+
+        return factory
+
+    return calls, {
+        ProviderName.OPENAI: ("openai_api_key", make(ProviderName.OPENAI)),
+        ProviderName.ANTHROPIC: (
+            "anthropic_api_key",
+            make(ProviderName.ANTHROPIC),
+        ),
+    }
+
+
+async def test_only_the_chosen_providers_injected_factory_is_called() -> None:
+    calls, injected = _recording_factories()
+    service = LLMService(_settings(), injected)
+    target = ModelTargetSchema(provider=ProviderName.ANTHROPIC, model="m")
+    await service.generate(target, "a")
+    await service.generate(target, "b")
+    assert calls == {"openai": [], "anthropic": ["sk-anthropic"]}
+    assert isinstance(service._providers[ProviderName.ANTHROPIC], FakeProvider)
+
+
+async def test_missing_key_fails_before_any_injected_factory_call() -> None:
+    calls, injected = _recording_factories()
+    service = LLMService(_settings(openai_api_key=None), injected)
+    with pytest.raises(ProviderNotConfiguredError):
+        service.ensure_provider_ready(ProviderName.OPENAI)
+    assert calls == {"openai": [], "anthropic": []}
+
+
+async def test_unsupported_provider_when_factory_is_not_injected() -> None:
+    calls, injected = _recording_factories()
+    del injected[ProviderName.ANTHROPIC]
+    service = LLMService(_settings(), injected)
+    with pytest.raises(UnsupportedProviderError):
+        service.ensure_provider_ready(ProviderName.ANTHROPIC)
+    assert calls == {"openai": [], "anthropic": []}
+
+
+def test_adapter_is_cached_per_instance_not_across_instances() -> None:
+    calls, injected = _recording_factories()
+    one = LLMService(_settings(), injected)
+    two = LLMService(_settings(), injected)
+    one.ensure_provider_ready(ProviderName.OPENAI)
+    one.ensure_provider_ready(ProviderName.OPENAI)
+    assert len(calls["openai"]) == 1
+    two.ensure_provider_ready(ProviderName.OPENAI)
+    assert len(calls["openai"]) == 2
+    assert (
+        one._providers[ProviderName.OPENAI]
+        is not two._providers[ProviderName.OPENAI]
+    )
