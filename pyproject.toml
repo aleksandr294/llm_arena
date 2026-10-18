@@ -7,7 +7,7 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
-fastapi = "*"
+fastapi = ">=0.121.1"
 pydantic = "^2"
 pydantic-settings = "*"
 sqlalchemy = {version = "^2", extras = ["asyncio"]}

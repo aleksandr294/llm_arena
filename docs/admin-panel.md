@@ -52,9 +52,10 @@ Out-of-scope rows are not listed, and opening one by id answers 404.
 
 ### Read-only, no export
 
-Panel data is **read-only**: adding, editing and deleting are refused (403)
-and so are file uploads, actions and the export buttons. The one exception is
-blocking organizations, below. Export is disabled because fastadmin's export
+Panel data is **read-only apart from blocking/unblocking organizations**:
+adding, editing and deleting are refused (403) and so are file uploads,
+actions and the export buttons. The one exception is blocking organizations,
+below. Export is disabled because fastadmin's export
 builds its columns from all model fields regardless of the hidden-column
 settings and would dump data in bulk. (fastadmin 0.10 does neutralize CSV
 formula cells itself; that is not why it is off.) Use the REST export, which

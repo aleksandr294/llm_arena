@@ -1,4 +1,3 @@
-import os
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -14,9 +13,7 @@ from components.core.database import (
     session_scope,
 )
 
-pytestmark = pytest.mark.skipif(
-    "DATABASE_URL" not in os.environ, reason="needs DATABASE_URL"
-)
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(autouse=True)

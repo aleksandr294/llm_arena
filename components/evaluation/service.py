@@ -141,6 +141,10 @@ class EvaluationService:
         total = await repository.count_unevaluated_results(
             experiment_id, evaluator_ids
         )
+        # Read-only unit: end its transaction so the connection goes back to
+        # the pool before the caller publishes to the broker. Not a commit;
+        # the entry point's final commit on an idle session is a no-op.
+        await self._session.rollback()
         return ids, max(total - len(ids), 0)
 
     async def list_evaluations(

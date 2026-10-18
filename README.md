@@ -15,7 +15,7 @@ You can:
 - compare quality, latency, token usage, estimated cost and error rates per
   model and export the results as JSON or CSV;
 - keep the data separated per organization, with roles and an optional
-  read-only admin panel.
+  admin panel (read-only apart from blocking/unblocking organizations).
 
 Results are stored case by case, so a partial failure never loses the
 successful ones, and failed cases can be retried on their own. Measured
@@ -189,7 +189,8 @@ Responsibilities are kept apart (details and rules in `CLAUDE.md`):
   separate from model generation.
 - **Task layer** (`components/*/tasks.py`, `taskiq_app.py`): Taskiq tasks for
   experiment execution and evaluation.
-- **Admin panel** (`admin/`): optional read-only fastadmin views.
+- **Admin panel** (`admin/`): optional fastadmin views, read-only apart from
+  blocking/unblocking organizations.
 - **Core** (`components/core/`): settings, database and session handling,
   `BaseRepository`, access control and the cross-component exceptions, enums,
   schemas and helpers.

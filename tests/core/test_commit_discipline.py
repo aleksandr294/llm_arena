@@ -70,6 +70,45 @@ def test_no_direct_session_commit_outside_database_module() -> None:
     assert offenders == []
 
 
+def _raw_session_dependencies(source: str) -> list[int]:
+    """Line numbers of ``Depends(get_session...)`` calls."""
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "Depends"
+        and node.args
+        and isinstance(node.args[0], ast.Name)
+        and node.args[0].id == "get_session"
+    ]
+
+
+def test_endpoints_use_the_shared_session_alias() -> None:
+    """A raw ``Depends(get_session)`` would get the default scope, whose
+    commit runs after the response. Only the alias in ``api/v1/utils.py``
+    (with ``scope="function"``) may name ``get_session``."""
+    offenders = []
+    for path in sorted((ROOT_DIR / "api").rglob("*.py")):
+        relative = path.relative_to(ROOT_DIR).as_posix()
+        if relative == "api/v1/utils.py":
+            continue
+        lines = _raw_session_dependencies(path.read_text(encoding="utf-8"))
+        offenders += [f"{relative}:{line}" for line in lines]
+    assert offenders == []
+
+
+def test_raw_session_dependency_checker_flags_a_violation() -> None:
+    bad = (
+        "from fastapi import Depends\n"
+        "async def endpoint(s=Depends(get_session)):\n"
+        "    pass\n"
+    )
+    assert _raw_session_dependencies(bad) == [2]
+    good = "async def endpoint(s: SessionDep):\n    pass\n"
+    assert _raw_session_dependencies(good) == []
+
+
 # --- the session dependency finishes before the response ---------------------
 
 

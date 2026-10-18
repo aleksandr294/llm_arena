@@ -88,6 +88,9 @@ async def engine() -> AsyncIterator[AsyncEngine]:
     import components.users.models  # noqa: F401
     from components.core.database import Base, create_engine
 
+    # Only mappers of ``components.*`` (all six model modules are imported
+    # above) get created. A test that registers its own table must create
+    # and drop it itself (see ``tests/core/test_session_scope.py``).
     tables = [
         cast(Table, mapper.local_table)
         for mapper in Base.registry.mappers
