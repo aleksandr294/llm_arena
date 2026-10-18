@@ -14,7 +14,8 @@ from taskiq import InMemoryBroker
 
 from components.evaluation.models import EvaluationResult
 from components.evaluation.service import EvaluationService
-from components.experiments.models import Experiment, ExperimentStatus
+from components.experiments.enums import ExperimentStatus
+from components.experiments.models import Experiment
 from components.experiments.runner import ExperimentRunner
 from components.experiments.service import ExperimentService
 from tests.access import ROOT, seed_principal

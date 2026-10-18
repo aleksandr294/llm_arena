@@ -19,7 +19,8 @@ from components.evaluation.evaluators import build_evaluator
 from components.evaluation.models import EvaluationResult
 from components.evaluation.schemas import parse_evaluator_config
 from components.evaluation.service import EvaluationService
-from components.experiments.models import ExperimentResult, ResultStatus
+from components.experiments.enums import ResultStatus
+from components.experiments.models import ExperimentResult
 from tests.access import Actors
 from tests.evaluation.test_repository import Factory, _setup
 from tests.experiments.helpers import Enqueued

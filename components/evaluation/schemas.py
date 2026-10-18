@@ -1,6 +1,6 @@
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -14,6 +14,7 @@ from pydantic import (
 )
 
 from components.core.utils import reject_nul
+from components.evaluation.enums import OutcomeStatus
 
 MAX_EVALUATORS = 20
 MAX_VALUES = 20
@@ -24,13 +25,6 @@ PATH_MAX = 200
 JsonType = Literal[
     "string", "number", "integer", "boolean", "array", "object", "null"
 ]
-
-
-class OutcomeStatus(StrEnum):
-    PASSED = "passed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    ERROR = "error"
 
 
 class EvaluationOutcome(BaseModel):
@@ -240,3 +234,15 @@ class EvaluationEnqueueSchema(BaseModel):
     enqueued: int
     # Results still lacking an evaluation after this batch; call again.
     remaining: int
+
+
+@dataclass(frozen=True)
+class EvaluationInput:
+    """Everything the evaluate task needs, read in one query."""
+
+    result_id: uuid.UUID
+    experiment_id: uuid.UUID
+    status: str
+    response_text: str | None
+    expected_output: str | None
+    evaluator_config: dict[str, Any]

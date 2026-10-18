@@ -8,18 +8,16 @@ from api.v1.docs import errors
 from api.v1.utils import get_principal
 from components.core.database import get_session_factory
 from components.core.schemas import Principal
+from components.evaluation.enums import OutcomeStatus
 from components.evaluation.schemas import (
     EvaluationEnqueueSchema,
     EvaluationPageSchema,
     EvaluationSummarySchema,
-    OutcomeStatus,
 )
 from components.evaluation.service import EvaluationService
 from components.evaluation.tasks import submit_results
-from components.experiments.service import (
-    EnqueueResults,
-    ExperimentNotFoundError,
-)
+from components.experiments.exceptions import ExperimentNotFoundError
+from components.experiments.service import EnqueueResults
 
 router = APIRouter(prefix="/experiments", tags=["evaluations"])
 

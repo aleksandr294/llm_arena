@@ -13,6 +13,7 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel
 
+from components.evaluation.enums import OutcomeStatus
 from components.evaluation.schemas import (
     ContainsParams,
     EvaluationOutcome,
@@ -22,7 +23,6 @@ from components.evaluation.schemas import (
     JsonValidParams,
     LengthBetweenParams,
     NotContainsParams,
-    OutcomeStatus,
 )
 
 

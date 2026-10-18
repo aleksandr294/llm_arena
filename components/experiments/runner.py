@@ -18,8 +18,8 @@ from typing import Any
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.experiments.logic import backoff_delay
-from components.experiments.models import Experiment, ResultStatus
+from components.experiments.enums import ResultStatus
+from components.experiments.models import Experiment
 from components.experiments.repository import (
     LEASE_SECONDS,
     ExperimentRepository,
@@ -27,6 +27,7 @@ from components.experiments.repository import (
     finalize_experiment,
 )
 from components.experiments.schemas import ExperimentConfigSchema
+from components.experiments.utils import backoff_delay
 from components.third_party.llm.providers.base import LLMProviderError
 from components.third_party.llm.schemas import (
     LLMResponseSchema,

@@ -12,15 +12,11 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from components.core.enums import Role
+from components.experiments.exceptions import ExperimentNotFoundError
 from components.experiments.models import Experiment
-from components.experiments.service import ExperimentNotFoundError
 from components.metrics import export
-from components.metrics.export import (
-    csv_stream,
-    json_stream,
-    neutralize,
-    prepare_export,
-)
+from components.metrics.export import csv_stream, json_stream, prepare_export
+from components.metrics.utils import neutralize
 from tests.access import ROOT, seed_principal
 from tests.metrics.helpers import Row, seed
 

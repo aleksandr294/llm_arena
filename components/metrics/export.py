@@ -22,18 +22,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from components.core.schemas import Principal
 from components.evaluation.models import EvaluationResult
 from components.evaluation.schemas import parse_evaluator_config
+from components.experiments.exceptions import ExperimentNotFoundError
 from components.experiments.models import ExperimentResult
 from components.experiments.repository import ExperimentRepository
-from components.experiments.service import ExperimentNotFoundError
 from components.metrics.schemas import ComparisonSchema
 from components.metrics.service import MetricsService
+from components.metrics.utils import neutralize
 
 logger = logging.getLogger(__name__)
 
 EXPORT_BATCH_SIZE = 500
-# Spreadsheets treat cells starting with these as formulas.
-FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
 _R = ExperimentResult
 Factory = async_sessionmaker[AsyncSession]
 
@@ -64,11 +62,6 @@ class ExportContext:
     header: dict[str, Any]
     evaluator_ids: list[str]
     comparison: ComparisonSchema
-
-
-def neutralize(value: str) -> str:
-    """Prefix a single quote so spreadsheets do not run text as a formula."""
-    return "'" + value if value.startswith(FORMULA_PREFIXES) else value
 
 
 def _evaluator_ids(evaluator_config: dict[str, Any]) -> list[str]:

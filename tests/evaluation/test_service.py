@@ -12,8 +12,9 @@ from components.evaluation import evaluators
 from components.evaluation.models import EvaluationResult
 from components.evaluation.repository import EvaluationRepository
 from components.evaluation.service import EvaluationService
-from components.experiments.models import ExperimentResult, ResultStatus
-from components.experiments.service import ExperimentNotFoundError
+from components.experiments.enums import ResultStatus
+from components.experiments.exceptions import ExperimentNotFoundError
+from components.experiments.models import ExperimentResult
 from tests.access import ROOT
 from tests.evaluation.test_repository import Factory, _setup
 

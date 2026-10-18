@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from components.core.schemas import Principal
+from components.evaluation.enums import OutcomeStatus
 from components.evaluation.evaluators import EVALUATORS, build_evaluator
 from components.evaluation.repository import EvaluationRepository
 from components.evaluation.schemas import (
@@ -20,12 +21,11 @@ from components.evaluation.schemas import (
     EvaluationSummarySchema,
     EvaluatorConfigSchema,
     EvaluatorSummarySchema,
-    OutcomeStatus,
     parse_evaluator_config,
 )
-from components.experiments.models import ResultStatus
+from components.experiments.enums import ResultStatus
+from components.experiments.exceptions import ExperimentNotFoundError
 from components.experiments.repository import ExperimentRepository
-from components.experiments.service import ExperimentNotFoundError
 
 logger = logging.getLogger(__name__)
 

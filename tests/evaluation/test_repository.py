@@ -11,11 +11,8 @@ from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.evaluation.models import EvaluationResult
 from components.evaluation.repository import EvaluationRepository
-from components.experiments.models import (
-    Experiment,
-    ExperimentResult,
-    ResultStatus,
-)
+from components.experiments.enums import ResultStatus
+from components.experiments.models import Experiment, ExperimentResult
 from tests.access import seed_organization
 
 pytestmark = pytest.mark.integration

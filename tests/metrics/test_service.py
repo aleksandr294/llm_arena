@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.experiments.service import ExperimentNotFoundError
+from components.experiments.exceptions import ExperimentNotFoundError
 from components.metrics.schemas import ComparisonSchema
 from components.metrics.service import MetricsService
 from tests.access import ROOT

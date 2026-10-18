@@ -13,7 +13,7 @@ from components.core.schemas import Principal
 from components.evaluation import service as service_module
 from components.evaluation.repository import EvaluationRepository
 from components.evaluation.service import EvaluationService
-from components.experiments.models import ResultStatus
+from components.experiments.enums import ResultStatus
 from tests.access import Actors
 from tests.evaluation.test_repository import Factory, _setup
 from tests.experiments.helpers import Enqueued

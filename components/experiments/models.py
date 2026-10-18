@@ -1,6 +1,5 @@
 import uuid
 from datetime import datetime
-from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
@@ -24,23 +23,7 @@ from components.core.database import Base
 # only this module is imported (e.g. a worker that loads just
 # ``experiments.tasks``), or SQLAlchemy cannot resolve them on flush.
 from components.datasets import models as _datasets_models  # noqa: F401
-
-
-class ExperimentStatus(StrEnum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    PARTIALLY_FAILED = "partially_failed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class ResultStatus(StrEnum):
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+from components.experiments.enums import ExperimentStatus, ResultStatus
 
 
 class Experiment(Base):

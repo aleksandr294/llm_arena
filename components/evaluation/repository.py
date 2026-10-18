@@ -1,6 +1,5 @@
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Select, func, select
@@ -9,23 +8,9 @@ from sqlalchemy.dialects.postgresql import insert
 from components.core.repository import BaseRepository
 from components.datasets.models import TestCase
 from components.evaluation.models import EvaluationResult
-from components.experiments.models import (
-    Experiment,
-    ExperimentResult,
-    ResultStatus,
-)
-
-
-@dataclass(frozen=True)
-class EvaluationInput:
-    """Everything the evaluate task needs, read in one query."""
-
-    result_id: uuid.UUID
-    experiment_id: uuid.UUID
-    status: str
-    response_text: str | None
-    expected_output: str | None
-    evaluator_config: dict[str, Any]
+from components.evaluation.schemas import EvaluationInput
+from components.experiments.enums import ResultStatus
+from components.experiments.models import Experiment, ExperimentResult
 
 
 class EvaluationRepository(BaseRepository[EvaluationResult]):

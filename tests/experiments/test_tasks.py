@@ -10,7 +10,7 @@ import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from taskiq import InMemoryBroker
 
-from components.experiments.models import ExperimentStatus, ResultStatus
+from components.experiments.enums import ExperimentStatus, ResultStatus
 from components.experiments.runner import ExperimentRunner
 from components.experiments.service import ExperimentService
 from tests.access import ROOT

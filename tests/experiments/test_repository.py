@@ -10,12 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from components.datasets.models import Dataset, TestCase
-from components.experiments.models import (
-    Experiment,
-    ExperimentResult,
-    ExperimentStatus,
-    ResultStatus,
-)
+from components.experiments.enums import ExperimentStatus, ResultStatus
+from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.repository import (
     ExperimentRepository,
     ExperimentResultRepository,

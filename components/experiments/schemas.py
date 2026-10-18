@@ -14,7 +14,7 @@ from pydantic import (
 from components.core.utils import reject_nul
 from components.datasets.schemas import TEXT_MAX, NameStr
 from components.evaluation.schemas import EvaluatorConfigSchema
-from components.experiments.logic import INPUT_TOKEN
+from components.experiments.utils import INPUT_TOKEN
 from components.third_party.llm.schemas import ModelTargetSchema
 
 MAX_TARGETS = 10

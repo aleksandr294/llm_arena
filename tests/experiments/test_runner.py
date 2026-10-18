@@ -8,12 +8,8 @@ import pytest
 from sqlalchemy import text
 
 from components.experiments import runner as runner_module
-from components.experiments.models import (
-    Experiment,
-    ExperimentResult,
-    ExperimentStatus,
-    ResultStatus,
-)
+from components.experiments.enums import ExperimentStatus, ResultStatus
+from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.repository import ExperimentResultRepository
 from components.experiments.runner import ExperimentRunner
 from components.experiments.service import ExperimentService

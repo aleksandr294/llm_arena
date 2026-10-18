@@ -12,16 +12,9 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from components.metrics.exceptions import PricingConfigError
+
 TOKENS_PER_UNIT = Decimal(1_000_000)
-
-
-class PricingConfigError(Exception):
-    """The configured pricing file is missing or invalid."""
-
-    def __init__(self, path: str, reason: str) -> None:
-        super().__init__(f"Pricing file {path!r} is unusable: {reason}")
-        self.path = path
-        self.reason = reason
 
 
 class RateSchema(BaseModel):

@@ -1,6 +1,5 @@
 import uuid
 from collections.abc import AsyncIterator
-from enum import StrEnum
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,7 +11,8 @@ from api.v1.utils import get_principal
 from components.core.config import get_settings
 from components.core.database import get_session, get_session_factory
 from components.core.schemas import Principal
-from components.experiments.service import ExperimentNotFoundError
+from components.experiments.exceptions import ExperimentNotFoundError
+from components.metrics.enums import ExportFormat
 from components.metrics.export import csv_stream, json_stream, prepare_export
 from components.metrics.schemas import (
     CasePageSchema,
@@ -25,11 +25,6 @@ router = APIRouter(prefix="/experiments", tags=["metrics"])
 
 Limit = Annotated[int, Query(ge=1, le=100)]
 Offset = Annotated[int, Query(ge=0)]
-
-
-class ExportFormat(StrEnum):
-    JSON = "json"
-    CSV = "csv"
 
 
 def get_pricing_file() -> str | None:

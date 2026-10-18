@@ -6,7 +6,7 @@ Kept free of I/O so they are unit-testable without a database or a clock.
 import re
 from collections.abc import Mapping
 
-from components.experiments.models import ExperimentStatus, ResultStatus
+from components.experiments.enums import ExperimentStatus, ResultStatus
 
 INPUT_TOKEN = "{input}"
 EXPECTED_OUTPUT_TOKEN = "{expected_output}"
