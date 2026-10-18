@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from admin import mount_admin
+from api.middleware import SecurityMiddleware
 from api.v1.router import api_v1_router
 from components.core.config import SettingsSchema, get_settings
 
@@ -36,7 +37,8 @@ organizations.
 
 A resource outside the caller's visibility answers `404`, as if it did not \
 exist. Errors have the body `{"detail": ...}`; `422` carries a list of \
-validation problems.
+validation problems. A request body over the configured limit (2 MiB by \
+default) answers `413`.
 """
 
 OPENAPI_TAGS = [
@@ -99,4 +101,10 @@ def create_app(settings: SettingsSchema | None = None) -> FastAPI:
     # Mounted last so it never shadows an API route; a no-op without
     # ADMIN_SECRET_KEY.
     mount_admin(app, settings)
+    # Added after the mount so it also wraps the panel.
+    app.add_middleware(
+        SecurityMiddleware,
+        max_body_bytes=settings.max_request_body_bytes,
+        hsts_max_age_seconds=settings.hsts_max_age_seconds,
+    )
     return app
