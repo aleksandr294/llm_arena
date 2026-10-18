@@ -8,11 +8,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.orm import aliased, selectinload
 
-from admin.core import (
-    ReadOnlyScopedAdmin,
-    SessionUser,
-    scoped_sessionmaker,
-)
+from admin.core import ReadOnlyScopedAdmin, scoped_sessionmaker
+from admin.schemas import SessionUser
 from components.core.enums import Role
 from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase

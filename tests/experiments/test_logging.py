@@ -15,8 +15,8 @@ from api.v1.endpoints.experiments import get_enqueue, get_llm_service
 from components.core.database import get_session
 from components.core.schemas import Principal
 from components.experiments.runner import ExperimentRunner
-from components.third_party.llm.providers.base import LLMProviderError
-from components.third_party.llm.schemas import LLMErrorKind, ProviderName
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
+from components.third_party.llm.exceptions import LLMProviderError
 from tests.access import Actors
 from tests.experiments.helpers import (
     Enqueued,

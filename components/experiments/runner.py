@@ -28,17 +28,17 @@ from components.experiments.repository import (
 )
 from components.experiments.schemas import ExperimentConfigSchema
 from components.experiments.utils import backoff_delay
-from components.third_party.llm.providers.base import LLMProviderError
-from components.third_party.llm.schemas import (
-    LLMResponseSchema,
-    ModelTargetSchema,
-    ProviderName,
-)
-from components.third_party.llm.service import (
-    LLMService,
+from components.third_party.llm.enums import ProviderName
+from components.third_party.llm.exceptions import (
+    LLMProviderError,
     ProviderNotConfiguredError,
     UnsupportedProviderError,
 )
+from components.third_party.llm.schemas import (
+    LLMResponseSchema,
+    ModelTargetSchema,
+)
+from components.third_party.llm.service import LLMService
 
 logger = logging.getLogger(__name__)
 

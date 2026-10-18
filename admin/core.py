@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import ORMExecuteState, Session, with_loader_criteria
 
+from admin.schemas import SessionUser
 from components.core.access import scope_clause
 from components.core.database import get_engine
 from components.core.enums import Role
@@ -32,24 +33,6 @@ from components.organizations.models import Organization
 from components.users.models import User
 
 PRINCIPAL_KEY = "principal"
-
-
-class SessionUser:
-    """What the user admin returns while fastadmin validates a session.
-
-    fastadmin binds the value as ``self.user``. It is deliberately not a
-    serialisable type (no ``__dict__``, not a model or dataclass): were it
-    ever returned from a data route, serialising it fails instead of
-    exposing the principal's ids and role.
-    """
-
-    __slots__ = ("principal",)
-
-    def __init__(self, principal: Principal) -> None:
-        self.principal = principal
-
-    def __repr__(self) -> str:
-        return "SessionUser()"
 
 
 def principal_of(user: Any) -> Principal | None:

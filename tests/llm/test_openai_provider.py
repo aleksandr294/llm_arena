@@ -6,13 +6,10 @@ import httpx2
 import openai
 import pytest
 
-from components.third_party.llm.providers.base import LLMProviderError
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
+from components.third_party.llm.exceptions import LLMProviderError
 from components.third_party.llm.providers.openai import OpenAIProvider
-from components.third_party.llm.schemas import (
-    LLMErrorKind,
-    LLMRequestSchema,
-    ProviderName,
-)
+from components.third_party.llm.schemas import LLMRequestSchema
 
 REQUEST = LLMRequestSchema(model="gpt-test", prompt="SECRET-PROMPT")
 HTTP_REQUEST = httpx2.Request("POST", "https://example.invalid/v1")

@@ -69,4 +69,4 @@ See the proposal for motivation.
 
 ## Open Questions
 
-- Whether to also add a `dependencies.py` per component for FastAPI wiring later; not needed for this change.
+- Resolved during apply: because the HTTP dependencies, Taskiq task modules, `cli.py`, the admin classes and the tests all build the same service graph, each component that has injected collaborators gets a small `dependencies.py` with plain factory functions (`get_<name>_service(session, ...)`, no FastAPI imports) that is the single place where that service is wired. Endpoint `Depends` functions, tasks, the CLI, admin classes and tests call these factories instead of repeating constructor calls.

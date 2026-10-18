@@ -12,7 +12,8 @@ from typing import Any
 from fastadmin import register
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from admin.core import ReadOnlyScopedAdmin, SessionUser
+from admin.core import ReadOnlyScopedAdmin
+from admin.schemas import SessionUser
 from components.auth.security import (
     PASSWORD_MAX_LENGTH,
     verify_dummy_password,

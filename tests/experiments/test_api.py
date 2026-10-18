@@ -16,7 +16,7 @@ from components.core.database import get_session
 from components.core.schemas import Principal
 from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.runner import ExperimentRunner
-from components.third_party.llm.schemas import LLMErrorKind, ProviderName
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
 from tests.access import Actors
 from tests.experiments.helpers import (
     Enqueued,

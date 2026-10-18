@@ -19,7 +19,7 @@ from components.experiments.exceptions import (
 from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.repository import ExperimentResultRepository
 from components.experiments.service import ExperimentService
-from components.third_party.llm.schemas import ProviderName
+from components.third_party.llm.enums import ProviderName
 from tests.access import ROOT, seed_principal
 from tests.experiments.helpers import (
     Enqueued,

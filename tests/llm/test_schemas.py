@@ -3,11 +3,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from components.third_party.llm.enums import ProviderName
 from components.third_party.llm.schemas import (
     LLMRequestSchema,
     LLMResponseSchema,
     LLMUsageSchema,
-    ProviderName,
 )
 
 

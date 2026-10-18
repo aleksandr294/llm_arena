@@ -5,42 +5,17 @@ from typing import Any
 import openai
 from openai import AsyncOpenAI
 
-from components.third_party.llm.providers.base import (
-    BaseLLMProvider,
-    LLMProviderError,
-)
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
+from components.third_party.llm.exceptions import LLMProviderError
+from components.third_party.llm.providers.base import BaseLLMProvider
 from components.third_party.llm.schemas import (
-    LLMErrorKind,
     LLMRequestSchema,
     LLMResponseSchema,
     LLMUsageSchema,
-    ProviderName,
 )
+from components.third_party.llm.utils import retry_after, status_kind
 
 logger = logging.getLogger(__name__)
-
-
-def _retry_after(error: openai.APIStatusError) -> float | None:
-    raw = error.response.headers.get("retry-after")
-    if raw is None:
-        return None
-    try:
-        value = float(raw)
-    except ValueError:
-        return None
-    return value if value >= 0 else None
-
-
-def _status_kind(status: int) -> LLMErrorKind:
-    if status == 429:
-        return LLMErrorKind.RATE_LIMIT
-    if status in (401, 403):
-        return LLMErrorKind.AUTHENTICATION
-    if status in (400, 404, 413, 422):
-        return LLMErrorKind.INVALID_REQUEST
-    if status >= 500:
-        return LLMErrorKind.SERVER_ERROR
-    return LLMErrorKind.UNKNOWN
 
 
 class OpenAIProvider(BaseLLMProvider):
@@ -144,13 +119,13 @@ class OpenAIProvider(BaseLLMProvider):
                 retryable=True,
             )
         if isinstance(exc, openai.APIStatusError):
-            kind = _status_kind(exc.status_code)
+            kind = status_kind(exc.status_code)
             return LLMProviderError(
                 kind,
                 self.name,
                 f"http status {exc.status_code}",
                 request_id=exc.request_id,
-                retry_after_seconds=_retry_after(exc),
+                retry_after_seconds=retry_after(exc.response.headers),
             )
         if isinstance(exc, openai.APIResponseValidationError):
             return LLMProviderError(

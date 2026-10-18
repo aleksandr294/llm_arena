@@ -6,16 +6,16 @@ from pydantic import SecretStr, ValidationError
 
 from components.core.config import SettingsSchema
 from components.third_party.llm import service as service_module
-from components.third_party.llm.schemas import (
-    LLMResponseSchema,
-    ModelTargetSchema,
-    ProviderName,
-)
-from components.third_party.llm.service import (
-    LLMService,
+from components.third_party.llm.enums import ProviderName
+from components.third_party.llm.exceptions import (
     ProviderNotConfiguredError,
     UnsupportedProviderError,
 )
+from components.third_party.llm.schemas import (
+    LLMResponseSchema,
+    ModelTargetSchema,
+)
+from components.third_party.llm.service import LLMService
 
 
 def _settings(**overrides: Any) -> SettingsSchema:

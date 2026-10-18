@@ -13,12 +13,9 @@ from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.repository import ExperimentResultRepository
 from components.experiments.runner import ExperimentRunner
 from components.experiments.service import ExperimentService
-from components.third_party.llm.schemas import (
-    LLMErrorKind,
-    LLMUsageSchema,
-    ProviderName,
-)
-from components.third_party.llm.service import ProviderNotConfiguredError
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
+from components.third_party.llm.exceptions import ProviderNotConfiguredError
+from components.third_party.llm.schemas import LLMUsageSchema
 from tests.access import ROOT
 from tests.experiments.helpers import (
     Enqueued,

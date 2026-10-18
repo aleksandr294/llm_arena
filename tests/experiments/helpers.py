@@ -14,18 +14,17 @@ from components.experiments.schemas import (
     ExperimentCreateSchema,
 )
 from components.experiments.service import ExperimentService
-from components.third_party.llm.providers.base import LLMProviderError
+from components.third_party.llm.enums import LLMErrorKind, ProviderName
+from components.third_party.llm.exceptions import (
+    LLMProviderError,
+    ProviderNotConfiguredError,
+)
 from components.third_party.llm.schemas import (
-    LLMErrorKind,
     LLMResponseSchema,
     LLMUsageSchema,
     ModelTargetSchema,
-    ProviderName,
 )
-from components.third_party.llm.service import (
-    LLMService,
-    ProviderNotConfiguredError,
-)
+from components.third_party.llm.service import LLMService
 from tests.access import ROOT, seed_principal
 
 Factory = async_sessionmaker[AsyncSession]

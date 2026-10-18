@@ -3,6 +3,11 @@ from collections.abc import Callable
 from pydantic import SecretStr
 
 from components.core.config import SettingsSchema
+from components.third_party.llm.enums import ProviderName
+from components.third_party.llm.exceptions import (
+    ProviderNotConfiguredError,
+    UnsupportedProviderError,
+)
 from components.third_party.llm.providers.anthropic import AnthropicProvider
 from components.third_party.llm.providers.base import BaseLLMProvider
 from components.third_party.llm.providers.openai import OpenAIProvider
@@ -10,25 +15,7 @@ from components.third_party.llm.schemas import (
     LLMRequestSchema,
     LLMResponseSchema,
     ModelTargetSchema,
-    ProviderName,
 )
-
-
-class UnsupportedProviderError(Exception):
-    """The target names a provider that has no adapter."""
-
-
-class ProviderNotConfiguredError(Exception):
-    """The provider's API key setting is missing or blank. The message
-    names the setting only, never a value."""
-
-    def __init__(self, provider: ProviderName, setting: str) -> None:
-        self.provider = provider
-        self.setting = setting
-        super().__init__(
-            f"Provider '{provider.value}' is not configured: " f"set {setting}"
-        )
-
 
 # provider -> (settings attribute holding the key, adapter factory)
 _REGISTRY: dict[ProviderName, tuple[str, Callable[[str], BaseLLMProvider]]] = {

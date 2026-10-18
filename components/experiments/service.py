@@ -25,11 +25,11 @@ from components.experiments.repository import (
 )
 from components.experiments.schemas import ExperimentCreateSchema
 from components.experiments.utils import render_prompt
-from components.third_party.llm.service import (
-    LLMService,
+from components.third_party.llm.exceptions import (
     ProviderNotConfiguredError,
     UnsupportedProviderError,
 )
+from components.third_party.llm.service import LLMService
 
 MAX_RESULTS = 10_000
 
