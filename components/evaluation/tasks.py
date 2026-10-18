@@ -6,24 +6,23 @@ configuration decides what runs. Enqueueing only means submitted.
 
 import uuid
 from collections.abc import Sequence
-from functools import lru_cache
 from typing import Any
 
-from components.core.database import get_session_factory
-from components.evaluation.service import EvaluationService
+from components.core.database import session_scope
+from components.evaluation.dependencies import build_evaluation_service
 from taskiq_app import broker, ensure_broker_started
 
 EVALUATE_RESULT_TASK = "evaluation.evaluate_result"
 
 
-@lru_cache
-def get_service() -> EvaluationService:
-    return EvaluationService(get_session_factory())
-
-
 @broker.task(task_name=EVALUATE_RESULT_TASK)
 async def evaluate_result(result_id: str) -> None:
-    await get_service().evaluate_result(uuid.UUID(result_id))
+    # The entry point owns the session: one read, pure evaluation and one
+    # insert in a single transaction, committed by the scope.
+    async with session_scope() as session:
+        await build_evaluation_service(session).evaluate_result(
+            uuid.UUID(result_id)
+        )
 
 
 async def enqueue_results(

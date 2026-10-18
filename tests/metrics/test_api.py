@@ -5,6 +5,7 @@ import io
 import json
 import uuid
 from collections.abc import AsyncIterator
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from api.v1.endpoints.metrics import get_factory, get_pricing_file
+from api.v1.endpoints.metrics import get_pricing_file, get_session_scope
 from components.core.database import get_session, session_scope
 from components.core.schemas import Principal
 from tests.access import Actors
@@ -30,7 +31,9 @@ def _overrides(app: FastAPI, session_factory: Factory) -> None:
             yield session
 
     app.dependency_overrides[get_session] = session_override
-    app.dependency_overrides[get_factory] = lambda: session_factory
+    app.dependency_overrides[get_session_scope] = lambda: partial(
+        session_scope, session_factory
+    )
     app.dependency_overrides[get_pricing_file] = lambda: None
 
 

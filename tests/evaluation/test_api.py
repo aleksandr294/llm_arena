@@ -8,13 +8,13 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from api.v1.endpoints.evaluations import get_enqueue, get_factory
+from api.v1.endpoints.evaluations import get_enqueue
 from components.core.schemas import Principal
 from components.evaluation import service as service_module
 from components.evaluation.repository import EvaluationRepository
-from components.evaluation.service import EvaluationService
 from components.experiments.enums import ResultStatus
 from tests.access import Actors
+from tests.evaluation.helpers import ScopedEvaluation
 from tests.evaluation.test_repository import Factory, _setup
 from tests.experiments.helpers import Enqueued
 
@@ -39,7 +39,6 @@ def _overrides(
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
     enqueued: Enqueued,
 ) -> None:
-    app.dependency_overrides[get_factory] = lambda: session_factory
     app.dependency_overrides[get_enqueue] = lambda: enqueued
 
 
@@ -88,7 +87,7 @@ async def test_evaluate_enqueues_unevaluated_succeeded_results(
     assert enqueued.flat == ids[:2]  # the failed generation is not included
 
     # Evaluate one; only the other remains.
-    await EvaluationService(session_factory).evaluate_result(ids[0])
+    await ScopedEvaluation(session_factory).evaluate_result(ids[0])
     enqueued.batches.clear()
     body = (await client.post(url(experiment_id, "evaluate"))).json()
     assert body["enqueued"] == 1
@@ -102,7 +101,7 @@ async def test_evaluate_with_nothing_to_do_returns_zero(
     owner: Principal,
 ) -> None:
     experiment_id, ids = await _make(session_factory, owner=owner)
-    service = EvaluationService(session_factory)
+    service = ScopedEvaluation(session_factory)
     for result_id in ids:
         await service.evaluate_result(result_id)
     response = await client.post(url(experiment_id, "evaluate"))
@@ -185,7 +184,7 @@ async def test_invalid_experiment_id_is_422(client: AsyncClient) -> None:
 
 
 async def _evaluate_all(factory: Factory, ids: list[uuid.UUID]) -> None:
-    service = EvaluationService(factory)
+    service = ScopedEvaluation(factory)
     for result_id in ids:
         await service.evaluate_result(result_id)
 
@@ -265,8 +264,8 @@ async def test_summary_counts_per_outcome_and_unevaluated(
         "error": 0,
     }
 
-    await EvaluationService(session_factory).evaluate_result(ids[0])
-    await EvaluationService(session_factory).evaluate_result(ids[1])
+    await ScopedEvaluation(session_factory).evaluate_result(ids[0])
+    await ScopedEvaluation(session_factory).evaluate_result(ids[1])
     summary = (
         await client.get(url(experiment_id, "evaluations/summary"))
     ).json()

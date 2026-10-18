@@ -2,12 +2,11 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.docs import errors
-from api.v1.utils import get_principal
-from components.core.database import get_session_factory
+from api.v1.utils import SessionDep, get_principal
 from components.core.schemas import Principal
+from components.evaluation.dependencies import build_evaluation_service
 from components.evaluation.enums import OutcomeStatus
 from components.evaluation.schemas import (
     EvaluationEnqueueSchema,
@@ -25,20 +24,13 @@ Limit = Annotated[int, Query(ge=1, le=100)]
 Offset = Annotated[int, Query(ge=0)]
 
 
-def get_factory() -> async_sessionmaker[AsyncSession]:
-    """Overridable in tests; the service manages its own sessions."""
-    return get_session_factory()
-
-
 def get_enqueue() -> EnqueueResults:
     """Overridable in tests so no broker is needed."""
     return submit_results
 
 
-def get_evaluation_service(
-    factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_factory)],
-) -> EvaluationService:
-    return EvaluationService(factory)
+def get_evaluation_service(session: SessionDep) -> EvaluationService:
+    return build_evaluation_service(session)
 
 
 ServiceDep = Annotated[EvaluationService, Depends(get_evaluation_service)]

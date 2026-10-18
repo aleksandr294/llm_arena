@@ -1,15 +1,17 @@
 """Evaluates stored responses; never touches generation state.
 
-Evaluators are pure, so no transaction is open while they run: the input is
-read in one short session and the outcomes are written in another. Logs
-carry ids, evaluator ids and outcomes only, never response text.
+The service works on the session it is given and never commits: the entry
+point (HTTP dependency or task) owns the transaction. Evaluators are pure
+and fast, so reading the input, evaluating and writing the outcomes share
+one session. Logs carry ids, evaluator ids and outcomes only, never response
+text.
 """
 
 import logging
 import uuid
 
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.core.schemas import Principal
 from components.evaluation.enums import OutcomeStatus
@@ -35,18 +37,15 @@ BACKFILL_BATCH_SIZE = 1000
 
 
 class EvaluationService:
-    def __init__(
-        self, session_factory: async_sessionmaker[AsyncSession]
-    ) -> None:
-        self._factory = session_factory
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
 
     async def _config(
         self,
-        session: AsyncSession,
         principal: Principal,
         experiment_id: uuid.UUID,
     ) -> EvaluatorConfigSchema:
-        experiment = await ExperimentRepository(session).get_scoped(
+        experiment = await ExperimentRepository(self._session).get_scoped(
             experiment_id, principal
         )
         if experiment is None:
@@ -73,9 +72,7 @@ class EvaluationService:
         """Store the outcome of every configured evaluator for one result.
         Idempotent: existing outcomes are left unchanged. Returns the number
         of rows inserted."""
-        async with self._factory() as session:
-            data = await EvaluationRepository(session).get_input(result_id)
-            await session.rollback()
+        data = await EvaluationRepository(self._session).get_input(result_id)
         if data is None:
             logger.info("result %s not found; nothing to evaluate", result_id)
             return 0
@@ -116,9 +113,7 @@ class EvaluationService:
                     "details": outcome.details,
                 }
             )
-        async with self._factory() as session:
-            inserted = await EvaluationRepository(session).insert_ignore(rows)
-            await session.commit()
+        inserted = await EvaluationRepository(self._session).insert_ignore(rows)
         logger.info(
             "result %s evaluated (%d evaluators, %d stored)",
             result_id,
@@ -137,17 +132,15 @@ class EvaluationService:
         configured evaluation, for the caller to enqueue, and how many
         still lack one after this batch. Empty without evaluators."""
         limit = BACKFILL_BATCH_SIZE if limit is None else limit
-        async with self._factory() as session:
-            config = await self._config(session, principal, experiment_id)
-            repository = EvaluationRepository(session)
-            evaluator_ids = [e.id for e in config.evaluators]
-            ids = await repository.list_unevaluated_result_ids(
-                experiment_id, evaluator_ids, limit
-            )
-            total = await repository.count_unevaluated_results(
-                experiment_id, evaluator_ids
-            )
-            await session.rollback()
+        config = await self._config(principal, experiment_id)
+        repository = EvaluationRepository(self._session)
+        evaluator_ids = [e.id for e in config.evaluators]
+        ids = await repository.list_unevaluated_result_ids(
+            experiment_id, evaluator_ids, limit
+        )
+        total = await repository.count_unevaluated_results(
+            experiment_id, evaluator_ids
+        )
         return ids, max(total - len(ids), 0)
 
     async def list_evaluations(
@@ -159,29 +152,24 @@ class EvaluationService:
         evaluator_id: str | None = None,
         status: str | None = None,
     ) -> tuple[list[EvaluationResultSchema], int]:
-        async with self._factory() as session:
-            experiments = ExperimentRepository(session)
-            if await experiments.get_scoped(experiment_id, principal) is None:
-                raise ExperimentNotFoundError(experiment_id)
-            rows, total = await EvaluationRepository(session).list_page(
-                experiment_id, limit, offset, evaluator_id, status
-            )
-            # Convert before the rollback, which expires the instances.
-            items = [EvaluationResultSchema.model_validate(r) for r in rows]
-            await session.rollback()
+        experiments = ExperimentRepository(self._session)
+        if await experiments.get_scoped(experiment_id, principal) is None:
+            raise ExperimentNotFoundError(experiment_id)
+        rows, total = await EvaluationRepository(self._session).list_page(
+            experiment_id, limit, offset, evaluator_id, status
+        )
+        items = [EvaluationResultSchema.model_validate(r) for r in rows]
         return items, total
 
     async def summary(
         self, principal: Principal, experiment_id: uuid.UUID
     ) -> EvaluationSummarySchema:
-        async with self._factory() as session:
-            config = await self._config(session, principal, experiment_id)
-            repository = EvaluationRepository(session)
-            counts = await repository.outcome_counts(experiment_id)
-            unevaluated = await repository.count_unevaluated_results(
-                experiment_id, [e.id for e in config.evaluators]
-            )
-            await session.rollback()
+        config = await self._config(principal, experiment_id)
+        repository = EvaluationRepository(self._session)
+        counts = await repository.outcome_counts(experiment_id)
+        unevaluated = await repository.count_unevaluated_results(
+            experiment_id, [e.id for e in config.evaluators]
+        )
         return EvaluationSummarySchema(
             evaluators=[
                 EvaluatorSummarySchema(

@@ -24,6 +24,7 @@ from tests.experiments.helpers import (
     FakeLLM,
     make_dataset,
     provider_error,
+    scope_of,
 )
 
 pytestmark = pytest.mark.integration
@@ -89,7 +90,9 @@ async def _create(
 
 
 async def _run_all(factory: Factory, llm: FakeLLM, enqueued: Enqueued) -> None:
-    runner = ExperimentRunner(factory, llm.as_service(), 4, jitter=lambda: 0.0)
+    runner = ExperimentRunner(
+        scope_of(factory), llm.as_service(), 4, jitter=lambda: 0.0
+    )
     for result_id in enqueued.flat:
         await runner.run(result_id)
     enqueued.batches.clear()

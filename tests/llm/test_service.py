@@ -5,7 +5,6 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from components.core.config import SettingsSchema
-from components.third_party.llm import service as service_module
 from components.third_party.llm.enums import ProviderName
 from components.third_party.llm.exceptions import (
     ProviderNotConfiguredError,
@@ -46,7 +45,7 @@ class FakeProvider:
 
 
 @pytest.fixture
-def factories(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+def factories() -> MagicMock:
     """Replace adapter factories; the mock records every creation."""
     created = MagicMock()
 
@@ -57,22 +56,19 @@ def factories(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
         return factory
 
-    monkeypatch.setattr(
-        service_module,
-        "_REGISTRY",
-        {
-            ProviderName.OPENAI: ("openai_api_key", make(ProviderName.OPENAI)),
-            ProviderName.ANTHROPIC: (
-                "anthropic_api_key",
-                make(ProviderName.ANTHROPIC),
-            ),
-        },
-    )
+    # Injected through the constructor: ``LLMService(settings, factories.map)``.
+    created.map = {
+        ProviderName.OPENAI: ("openai_api_key", make(ProviderName.OPENAI)),
+        ProviderName.ANTHROPIC: (
+            "anthropic_api_key",
+            make(ProviderName.ANTHROPIC),
+        ),
+    }
     return created
 
 
 async def test_two_providers_in_one_instance(factories: MagicMock) -> None:
-    service = LLMService(_settings())
+    service = LLMService(_settings(), factories.map)
     a = await service.generate(
         ModelTargetSchema(provider=ProviderName.OPENAI, model="gpt-x"), "hi"
     )
@@ -90,7 +86,7 @@ async def test_two_providers_in_one_instance(factories: MagicMock) -> None:
 
 
 async def test_providers_are_lazy_and_cached(factories: MagicMock) -> None:
-    service = LLMService(_settings())
+    service = LLMService(_settings(), factories.map)
     assert factories.call_count == 0
     target = ModelTargetSchema(provider=ProviderName.OPENAI, model="m")
     await service.generate(target, "a")
@@ -99,7 +95,7 @@ async def test_providers_are_lazy_and_cached(factories: MagicMock) -> None:
 
 
 async def test_request_options_are_forwarded(factories: MagicMock) -> None:
-    service = LLMService(_settings())
+    service = LLMService(_settings(), factories.map)
     target = ModelTargetSchema(provider=ProviderName.OPENAI, model="m")
     await service.generate(
         target,
@@ -124,7 +120,7 @@ async def test_unsupported_provider(factories: MagicMock) -> None:
         provider="ollama", model="m"  # type: ignore[arg-type]
     )
     with pytest.raises(UnsupportedProviderError, match="ollama"):
-        await LLMService(_settings()).generate(target, "p")
+        await LLMService(_settings(), factories.map).generate(target, "p")
     assert factories.call_count == 0
 
 
@@ -143,7 +139,7 @@ async def test_missing_or_blank_key(
     setting: str,
     value: SecretStr | None,
 ) -> None:
-    service = LLMService(_settings(**{field: value}))
+    service = LLMService(_settings(**{field: value}), factories.map)
     target = ModelTargetSchema(provider=provider, model="m")
     with pytest.raises(ProviderNotConfiguredError, match=setting):
         await service.generate(target, "p")
@@ -153,8 +149,8 @@ async def test_missing_or_blank_key(
 async def test_no_shared_state_between_instances(
     factories: MagicMock,
 ) -> None:
-    one = LLMService(_settings(openai_api_key="key-one"))
-    two = LLMService(_settings(openai_api_key="key-two"))
+    one = LLMService(_settings(openai_api_key="key-one"), factories.map)
+    two = LLMService(_settings(openai_api_key="key-two"), factories.map)
     target = ModelTargetSchema(provider=ProviderName.OPENAI, model="m")
     await one.generate(target, "p")
     assert not two._providers
@@ -179,7 +175,7 @@ async def test_no_shared_state_between_instances(
 async def test_invalid_request_rejected_before_provider_call(
     factories: MagicMock, kwargs: dict[str, Any]
 ) -> None:
-    service = LLMService(_settings())
+    service = LLMService(_settings(), factories.map)
     target = ModelTargetSchema(provider=ProviderName.OPENAI, model="m")
     with pytest.raises(ValidationError):
         await service.generate(target, **kwargs)
@@ -190,7 +186,7 @@ async def test_invalid_request_rejected_before_provider_call(
 async def test_same_response_shape_across_providers(
     factories: MagicMock,
 ) -> None:
-    service = LLMService(_settings())
+    service = LLMService(_settings(), factories.map)
     a = await service.generate(
         ModelTargetSchema(provider=ProviderName.OPENAI, model="m"), "hi"
     )

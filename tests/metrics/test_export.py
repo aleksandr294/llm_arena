@@ -5,12 +5,14 @@ import io
 import json
 import uuid
 from collections.abc import AsyncIterator
+from functools import partial
 from typing import Any
 
 import pytest
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from components.core.database import SessionScope, session_scope
 from components.core.enums import Role
 from components.experiments.exceptions import ExperimentNotFoundError
 from components.experiments.models import Experiment
@@ -27,6 +29,10 @@ pytestmark = pytest.mark.integration
 Factory = async_sessionmaker[AsyncSession]
 
 
+def _scope(factory: Factory) -> SessionScope:
+    return partial(session_scope, factory)
+
+
 def _metrics(session: AsyncSession) -> MetricsService:
     return build_metrics_service(session)
 
@@ -41,16 +47,20 @@ async def _collect(stream: AsyncIterator[str]) -> list[str]:
 async def _json(
     factory: Factory, experiment_id: uuid.UUID, include: bool = True
 ) -> tuple[dict[str, Any], int]:
-    context = await prepare_export(factory, ROOT, experiment_id, _metrics)
-    chunks = await _collect(json_stream(factory, context, include))
+    context = await prepare_export(
+        _scope(factory), ROOT, experiment_id, _metrics
+    )
+    chunks = await _collect(json_stream(_scope(factory), context, include))
     return json.loads("".join(chunks)), len(chunks)
 
 
 async def _csv(
     factory: Factory, experiment_id: uuid.UUID, include: bool = False
 ) -> list[list[str]]:
-    context = await prepare_export(factory, ROOT, experiment_id, _metrics)
-    chunks = await _collect(csv_stream(factory, context, include))
+    context = await prepare_export(
+        _scope(factory), ROOT, experiment_id, _metrics
+    )
+    chunks = await _collect(csv_stream(_scope(factory), context, include))
     return list(csv.reader(io.StringIO("".join(chunks), newline="")))
 
 
@@ -262,7 +272,9 @@ async def test_running_experiment_exports_with_finished_false(
 
 async def test_unknown_experiment_raises(session_factory: Factory) -> None:
     with pytest.raises(ExperimentNotFoundError):
-        await prepare_export(session_factory, ROOT, uuid.uuid4(), _metrics)
+        await prepare_export(
+            _scope(session_factory), ROOT, uuid.uuid4(), _metrics
+        )
 
 
 async def test_stream_failure_truncates_without_trailer(
@@ -270,7 +282,7 @@ async def test_stream_failure_truncates_without_trailer(
 ) -> None:
     experiment_id = await seed(session_factory, [Row(1), Row(2)])
     context = await prepare_export(
-        session_factory, ROOT, experiment_id, _metrics
+        _scope(session_factory), ROOT, experiment_id, _metrics
     )
 
     async def boom(*args: object, **kwargs: object) -> Any:
@@ -278,7 +290,7 @@ async def test_stream_failure_truncates_without_trailer(
         yield  # pragma: no cover
 
     monkeypatch.setattr(export, "iter_rows", boom)
-    chunks = await _collect(json_stream(session_factory, context, True))
+    chunks = await _collect(json_stream(_scope(session_factory), context, True))
     text = "".join(chunks)
     assert not text.endswith("]}")
     with pytest.raises(ValueError):
@@ -300,10 +312,10 @@ async def test_prepare_export_hides_out_of_scope_experiments(
     for principal in (colleague, stranger_admin):
         with pytest.raises(ExperimentNotFoundError):
             await prepare_export(
-                session_factory, principal, experiment_id, _metrics
+                _scope(session_factory), principal, experiment_id, _metrics
             )
     for principal in (owner, admin, ROOT):
         context = await prepare_export(
-            session_factory, principal, experiment_id, _metrics
+            _scope(session_factory), principal, experiment_id, _metrics
         )
         assert context.experiment_id == experiment_id

@@ -3,10 +3,12 @@
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
+from functools import partial
 from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from components.core.database import SessionScope, session_scope
 from components.core.schemas import Principal
 from components.datasets.models import Dataset, TestCase
 from components.experiments.dependencies import build_experiment_service
@@ -28,6 +30,11 @@ from components.third_party.llm.service import LLMService
 from tests.access import ROOT, seed_principal
 
 Factory = async_sessionmaker[AsyncSession]
+
+
+def scope_of(factory: Factory) -> SessionScope:
+    """The ``session_scope`` the task would inject, bound to a test factory."""
+    return partial(session_scope, factory)
 
 
 def response(

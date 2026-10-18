@@ -41,13 +41,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 
 # Modules that may call ``.commit()``. Everything else goes through
 # ``commit(session)`` or ``session_scope`` from ``components.core.database``.
-# The two runner/evaluation entries are the flows converted in task 4.3 and
-# keep their own sessions until then.
-_COMMIT_ALLOWLIST = {
-    "components/core/database.py",
-    "components/experiments/runner.py",
-    "components/evaluation/service.py",
-}
+_COMMIT_ALLOWLIST = {"components/core/database.py"}
 _SKIPPED_DIRS = {"tests", "migrations", "scripts", ".venv", "node_modules"}
 
 

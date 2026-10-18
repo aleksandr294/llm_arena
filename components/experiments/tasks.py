@@ -11,7 +11,7 @@ from functools import lru_cache
 from typing import Any
 
 from components.core.config import get_settings
-from components.core.database import get_session_factory
+from components.core.database import session_scope
 from components.evaluation import tasks as evaluation_tasks
 from components.experiments.runner import ExperimentRunner
 from components.third_party.llm.service import LLMService
@@ -30,7 +30,7 @@ def get_runner() -> ExperimentRunner:
     all concurrently running tasks."""
     settings = get_settings()
     return ExperimentRunner(
-        get_session_factory(),
+        session_scope,
         LLMService(settings),
         settings.llm_max_concurrency,
         on_succeeded=_enqueue_evaluation,

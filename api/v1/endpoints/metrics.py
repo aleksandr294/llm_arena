@@ -4,12 +4,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.docs import errors
 from api.v1.utils import SessionDep, get_principal
 from components.core.config import get_settings
-from components.core.database import get_session_factory
+from components.core.database import SessionScope, session_scope
 from components.core.schemas import Principal
 from components.experiments.exceptions import ExperimentNotFoundError
 from components.metrics.dependencies import build_metrics_service
@@ -33,9 +32,9 @@ def get_pricing_file() -> str | None:
     return get_settings().pricing_file
 
 
-def get_factory() -> async_sessionmaker[AsyncSession]:
+def get_session_scope() -> SessionScope:
     """Overridable in tests; the export opens a session per batch."""
-    return get_session_factory()
+    return session_scope
 
 
 def get_metrics_service(
@@ -114,7 +113,7 @@ async def metrics_cases(
 async def export_experiment(
     experiment_id: uuid.UUID,
     principal: PrincipalDep,
-    factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_factory)],
+    scope: Annotated[SessionScope, Depends(get_session_scope)],
     pricing_file: Annotated[str | None, Depends(get_pricing_file)],
     export_format: Annotated[
         ExportFormat, Query(alias="format")
@@ -126,7 +125,7 @@ async def export_experiment(
     truncates the stream (status 200 is already sent)."""
     try:
         context = await prepare_export(
-            factory,
+            scope,
             principal,
             experiment_id,
             lambda session: build_metrics_service(session, pricing_file),
@@ -137,9 +136,9 @@ async def export_experiment(
     # Responses are on by default for JSON and off for CSV.
     include = is_json if include_responses is None else include_responses
     stream: AsyncIterator[str] = (
-        json_stream(factory, context, include)
+        json_stream(scope, context, include)
         if is_json
-        else csv_stream(factory, context, include)
+        else csv_stream(scope, context, include)
     )
     return StreamingResponse(
         stream,

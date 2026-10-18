@@ -2,10 +2,13 @@
 
 import asyncio
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.experiments import runner as runner_module
 from components.experiments.dependencies import build_experiment_service
@@ -24,6 +27,7 @@ from tests.experiments.helpers import (
     make_experiment,
     provider_error,
     response,
+    scope_of,
 )
 
 pytestmark = pytest.mark.integration
@@ -45,7 +49,7 @@ def _runner(
     lease_seconds: int = 600,
 ) -> ExperimentRunner:
     return ExperimentRunner(
-        factory,
+        scope_of(factory),
         llm.as_service(),
         max_concurrency,
         lease_seconds=lease_seconds,
@@ -341,7 +345,7 @@ async def test_backoff_does_not_hold_the_semaphore(
         await release.wait()
 
     runner = ExperimentRunner(
-        session_factory,
+        scope_of(session_factory),
         llm.as_service(),
         1,
         sleep=sleep,
@@ -473,7 +477,7 @@ async def test_hook_called_once_after_succeeded_outcome(
     ids = await _ids(session_factory, experiment_id, ResultStatus.PENDING)
     hook = Hook()
     runner = ExperimentRunner(
-        session_factory,
+        scope_of(session_factory),
         FakeLLM().as_service(),
         on_succeeded=hook,
         jitter=lambda: 0.0,
@@ -495,7 +499,7 @@ async def test_hook_not_called_for_failure(session_factory: Factory) -> None:
     hook = Hook()
     llm = FakeLLM([provider_error(LLMErrorKind.AUTHENTICATION)])
     runner = ExperimentRunner(
-        session_factory, llm.as_service(), on_succeeded=hook
+        scope_of(session_factory), llm.as_service(), on_succeeded=hook
     )
     await runner.run(result_id)
     assert hook.ids == []
@@ -526,7 +530,7 @@ async def test_hook_not_called_for_stale_write(
 
     llm.handler = steal
     runner = ExperimentRunner(
-        session_factory, llm.as_service(), on_succeeded=hook
+        scope_of(session_factory), llm.as_service(), on_succeeded=hook
     )
     await runner.run(result_id)
     assert hook.ids == []
@@ -541,7 +545,7 @@ async def test_failing_hook_does_not_change_the_result(
     )
     hook = Hook(fail=True)
     runner = ExperimentRunner(
-        session_factory, FakeLLM().as_service(), on_succeeded=hook
+        scope_of(session_factory), FakeLLM().as_service(), on_succeeded=hook
     )
     with caplog.at_level("WARNING"):
         await runner.run(result_id)
@@ -569,10 +573,66 @@ async def test_hanging_hook_is_bounded(
         await asyncio.Event().wait()
 
     runner = ExperimentRunner(
-        session_factory, FakeLLM().as_service(), on_succeeded=hang
+        scope_of(session_factory), FakeLLM().as_service(), on_succeeded=hang
     )
     with caplog.at_level("WARNING"):
         await asyncio.wait_for(runner.run(result_id), 5)
     row = await _row(session_factory, result_id)
     assert row.status == "succeeded"
     assert "TimeoutError" in caplog.text
+
+
+async def test_no_session_or_transaction_is_open_during_the_model_call(
+    session_factory: Factory,
+) -> None:
+    """The claim is committed and the outcome not yet written while the
+    model call is in flight: no scope is open and the database shows no
+    transaction left open by the runner's sessions."""
+    open_scopes = 0
+    inner = scope_of(session_factory)
+
+    @asynccontextmanager
+    async def counting_scope() -> AsyncIterator[AsyncSession]:
+        nonlocal open_scopes
+        open_scopes += 1
+        try:
+            async with inner() as session:
+                yield session
+        finally:
+            open_scopes -= 1
+
+    observed: dict[str, Any] = {}
+    llm = FakeLLM()
+
+    async def handler(prompt: str) -> Any:
+        observed["open_scopes"] = open_scopes
+        async with session_factory() as other:
+            observed["idle_in_transaction"] = await other.scalar(
+                text(
+                    "select count(*) from pg_stat_activity "
+                    "where datname = current_database() "
+                    "and pid <> pg_backend_pid() "
+                    "and state like 'idle in transaction%'"
+                )
+            )
+            row = await other.scalar(
+                text("select status from experiment_results")
+            )
+            observed["status"] = row
+        return response()
+
+    llm.handler = handler
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    runner = ExperimentRunner(
+        counting_scope, llm.as_service(), jitter=lambda: 0.0
+    )
+    await runner.run(result_id)
+    assert observed == {
+        "open_scopes": 0,
+        "idle_in_transaction": 0,
+        "status": "running",  # the claim is already committed
+    }
+    assert (await _row(session_factory, result_id)).status == "succeeded"

@@ -4,7 +4,7 @@ from collections.abc import (
     Awaitable,
     Callable,
 )
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import (
@@ -78,6 +78,11 @@ async def commit(session: AsyncSession) -> None:
                 first_error = exc
     if first_error is not None:
         raise first_error
+
+
+# What the flows that open several short sessions of their own (the runner,
+# export streaming) receive from their entry point.
+SessionScope = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 
 @asynccontextmanager

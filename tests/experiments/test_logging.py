@@ -24,6 +24,7 @@ from tests.experiments.helpers import (
     FakeLLM,
     make_dataset,
     response,
+    scope_of,
 )
 
 pytestmark = pytest.mark.integration
@@ -109,7 +110,7 @@ async def test_no_sentinel_in_logs_or_stored_errors(
     experiment_id = created.json()["id"]
     await client.post(f"{URL}/{experiment_id}/start")
     runner = ExperimentRunner(
-        session_factory, llm.as_service(), 4, jitter=lambda: 0.0
+        scope_of(session_factory), llm.as_service(), 4, jitter=lambda: 0.0
     )
     for result_id in enqueued.flat:
         await runner.run(result_id)

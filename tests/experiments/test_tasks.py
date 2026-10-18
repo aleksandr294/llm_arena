@@ -18,6 +18,7 @@ from tests.experiments.helpers import (
     Factory,
     FakeLLM,
     make_experiment,
+    scope_of,
 )
 from tests.experiments.test_runner import _experiment, _ids, _row
 
@@ -47,7 +48,7 @@ async def test_started_experiment_executes_to_final_status(
     monkeypatch: MonkeyPatch,
 ) -> None:
     llm = FakeLLM()
-    runner = ExperimentRunner(session_factory, llm.as_service(), 2)
+    runner = ExperimentRunner(scope_of(session_factory), llm.as_service(), 2)
     monkeypatch.setattr(tasks_module, "get_runner", lambda: runner)
     memory = InMemoryBroker()
     task: Any = memory.register_task(
