@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from components.auth.models import RefreshToken
 from components.organizations.models import Organization
 from tests.access import PASSWORD
-from tests.admin.conftest import World
+from tests.admin.helpers import World
 from tests.admin.panel_process import API, Panel
 
 pytestmark = pytest.mark.integration

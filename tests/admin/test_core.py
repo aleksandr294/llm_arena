@@ -17,7 +17,7 @@ from components.evaluation.models import EvaluationResult
 from components.experiments.models import Experiment, ExperimentResult
 from components.organizations.models import Organization
 from components.users.models import User
-from tests.admin.conftest import World
+from tests.admin.helpers import World
 
 pytestmark = pytest.mark.integration
 

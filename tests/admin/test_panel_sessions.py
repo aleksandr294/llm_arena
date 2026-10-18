@@ -24,7 +24,7 @@ from components.core.enums import Role
 from components.users.models import User
 from components.users.repository import UserRepository
 from tests.access import PASSWORD
-from tests.admin.conftest import World
+from tests.admin.helpers import World
 from tests.admin.panel_process import (
     ADMIN_SECRET,
     API,

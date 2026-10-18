@@ -9,7 +9,7 @@ from sqlalchemy import select
 from components.auth.models import RefreshToken
 from components.core.enums import Role
 from components.users.models import User
-from tests.auth.conftest import (
+from tests.auth.helpers import (
     PASSWORD,
     Factory,
     Seeded,

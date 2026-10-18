@@ -21,7 +21,7 @@ from components.auth.models import RefreshToken
 from components.core import database
 from components.core.enums import Role
 from components.users.models import User
-from tests.auth.conftest import PASSWORD, Factory, seed_user
+from tests.auth.helpers import PASSWORD, Factory, seed_user
 
 pytestmark = pytest.mark.integration
 

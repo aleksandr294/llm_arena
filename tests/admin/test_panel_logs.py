@@ -8,7 +8,7 @@ from components.datasets.models import TestCase
 from components.experiments.models import ExperimentResult
 from components.users.models import User
 from tests.access import PASSWORD
-from tests.admin.conftest import World
+from tests.admin.helpers import World
 from tests.admin.panel_process import API, Panel
 
 pytestmark = pytest.mark.integration

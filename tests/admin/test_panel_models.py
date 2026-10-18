@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from components.organizations.models import Organization
 from components.users.models import User
 from tests.access import PASSWORD
-from tests.admin.conftest import World
+from tests.admin.helpers import World
 from tests.admin.panel_process import API, Panel
 from tests.admin.test_core import (
     DATASETS,

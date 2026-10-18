@@ -28,7 +28,7 @@ from components.core.config import SettingsSchema
 from components.core.database import Base
 from components.core.enums import Role
 from components.users.models import User
-from tests.auth.conftest import MODELS
+from tests.auth.helpers import MODELS
 
 pytestmark = pytest.mark.integration
 

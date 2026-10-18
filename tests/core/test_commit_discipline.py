@@ -28,7 +28,6 @@ from components.experiments.models import Experiment
 from components.organizations.dependencies import build_organization_service
 from components.organizations.models import Organization
 from components.users.dependencies import build_user_service
-from conftest import TEST_JWT_SECRET
 from tests.access import PASSWORD, ROOT, Actors, Factory
 from tests.experiments.helpers import (
     Enqueued,
@@ -218,16 +217,6 @@ def commit_log(monkeypatch: pytest.MonkeyPatch) -> _CommitLog:
 
     monkeypatch.setattr(AsyncSession, "commit", recording)
     return log
-
-
-@pytest.fixture
-async def settings(actors: Actors) -> SettingsSchema:
-    # ``actors`` has already pointed the app at the test settings.
-    return SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-        jwt_secret_key=TEST_JWT_SECRET,
-    )
 
 
 @pytest.mark.integration

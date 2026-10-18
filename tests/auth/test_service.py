@@ -31,7 +31,7 @@ from components.core.enums import Role
 from components.organizations.models import Organization
 from components.users.models import User
 from components.users.repository import UserRepository
-from tests.auth.conftest import PASSWORD, Factory, seed_user
+from tests.auth.helpers import PASSWORD, Factory, seed_user
 
 pytestmark = pytest.mark.integration
 

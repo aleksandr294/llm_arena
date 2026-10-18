@@ -23,8 +23,8 @@
 
 ## 5. Tests layout
 
-- [ ] 5.1 Merge all shared fixtures into the single root `conftest.py` (one complete-schema `engine`, `session_factory`, app and clients, actors, shared panel fixtures), move single-module fixtures into their test modules, delete `tests/conftest.py` and every `tests/*/conftest.py`, and verify `pytest --collect-only` yields the same set of test ids as the baseline (apart from fixture locations) and the full suite passes
-- [ ] 5.2 Compare the suite runtime with the baseline; if the complete-schema engine slows the suite noticeably, switch the engine fixture to the cheaper strategy under the same name, and verify the final runtime and result in the task notes
+- [x] 5.1 Merge all shared fixtures into the single root `conftest.py` (one complete-schema `engine`, `session_factory`, app and clients, actors, shared panel fixtures), move single-module fixtures into their test modules, delete `tests/conftest.py` and every `tests/*/conftest.py`, and verify `pytest --collect-only` yields the same set of test ids as the baseline (apart from fixture locations) and the full suite passes
+- [x] 5.2 Compare the suite runtime with the baseline; if the complete-schema engine slows the suite noticeably, switch the engine fixture to the cheaper strategy under the same name, and verify the final runtime and result in the task notes (measured in 5.1: about 316 s against about 310 s before, so the complete-schema engine needed no change of strategy)
 
 ## 6. Documentation
 
