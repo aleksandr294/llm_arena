@@ -33,7 +33,7 @@
 
 ## 7. Final checks
 
-- [ ] 7.1 Run `pytest` (including integration tests), `ruff check .`, `black --check .`, `mypy`, the import-everything script and the baseline comparisons (test count, OpenAPI schema, settings fields, task names, Alembic head), and verify all match or are explained, noting any tests that could not run
+- [x] 7.1 Run `pytest` (including integration tests), `ruff check .`, `black --check .`, `mypy`, the import-everything script and the baseline comparisons (test count, OpenAPI schema, settings fields, task names, Alembic head), and verify all match or are explained, noting any tests that could not run
 
 ## Workflow follow-up
 
