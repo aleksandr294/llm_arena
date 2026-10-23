@@ -1,3 +1,4 @@
+import inspect
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -5,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import anthropic
 import httpx2
 import pytest
+from anthropic.resources.messages import AsyncMessages
 
 from components.third_party.llm.enums import LLMErrorKind, ProviderName
 from components.third_party.llm.exceptions import LLMProviderError
@@ -75,6 +77,7 @@ async def test_success_maps_all_fields() -> None:
     assert kwargs["max_tokens"] == DEFAULT_MAX_TOKENS
     assert result.effective_max_tokens == DEFAULT_MAX_TOKENS
     assert "temperature" not in kwargs
+    assert "extra_body" not in kwargs
     assert "system" not in kwargs
     assert kwargs["messages"] == [{"role": "user", "content": "SECRET-PROMPT"}]
 
@@ -93,10 +96,28 @@ async def test_optional_parameters_are_forwarded() -> None:
     )
     kwargs = create.call_args.kwargs
     assert kwargs["system"] == "s"
-    assert kwargs["temperature"] == 0.5
+    assert kwargs["extra_body"] == {"temperature": 0.5}
+    assert "temperature" not in kwargs
     assert kwargs["max_tokens"] == 10
     assert result.effective_max_tokens == 10
     assert kwargs["timeout"] == 5
+
+
+async def test_call_keywords_match_the_sdk_signature() -> None:
+    # A mocked client accepts any keyword, so check against the real SDK.
+    provider, create = _provider(_message())
+    await provider.generate(
+        LLMRequestSchema(
+            model="m",
+            prompt="p",
+            system_prompt="s",
+            temperature=0.5,
+            max_tokens=10,
+            timeout_seconds=5,
+        )
+    )
+    accepted = inspect.signature(AsyncMessages.create).parameters
+    assert set(create.call_args.kwargs) <= set(accepted)
 
 
 async def test_multi_block_content_is_joined_ignoring_non_text() -> None:

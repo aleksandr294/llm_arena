@@ -40,7 +40,9 @@ class AnthropicProvider(BaseLLMProvider):
         if request.system_prompt:
             params["system"] = request.system_prompt
         if request.temperature is not None:
-            params["temperature"] = request.temperature
+            # The installed SDK's messages.create has no temperature
+            # parameter; extra_body puts it into the JSON request body.
+            params["extra_body"] = {"temperature": request.temperature}
 
         max_tokens = request.max_tokens or DEFAULT_MAX_TOKENS
         started = time.perf_counter()
