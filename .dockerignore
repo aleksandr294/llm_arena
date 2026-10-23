@@ -1,9 +1,25 @@
 .venv
 .git
 .idea
-.env
+.claude
 __pycache__
 .mypy_cache
 .ruff_cache
 .pytest_cache
+
+# Local environment files may hold real secrets (.env, .env.kan, ...); only
+# the committed example is allowed in the build context.
+.env
+.env.*
+!.env.example
+
+# Not needed at runtime
+tests
+conftest.py
+scripts
+docs
 openspec
+docker-compose*.yml
+.dockerignore
+.pre-commit-config.yaml
+*.md

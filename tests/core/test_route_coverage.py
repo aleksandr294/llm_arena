@@ -112,7 +112,7 @@ def test_public_allowlist_has_no_stale_entries(app: FastAPI) -> None:
         for path, route in _api_routes(app)
         for method in route.methods or ()
     }
-    assert PUBLIC <= registered
+    assert registered >= PUBLIC
 
 
 def test_route_walk_matches_the_openapi_document(app: FastAPI) -> None:

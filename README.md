@@ -92,8 +92,16 @@ Edit `.env`:
   ```
 
 - Optional: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` (a provider without a key
-  is unavailable), `LLM_MAX_CONCURRENCY`, `PRICING_FILE` (see
+  is unavailable), `LLM_MAX_CONCURRENCY`, `MAX_STORED_RESPONSE_CHARS` (default
+  1000000; longer model output is stored cut with a marker and flagged
+  `response_truncated`), `PRICING_FILE` (see
   `docs/pricing.example.json`), `API_DOCS_ENABLED`.
+- Optional HTTP hardening: `MAX_REQUEST_BODY_BYTES` (default 2097152; a
+  larger body gets `413`) and `HSTS_MAX_AGE_SECONDS` (default 0 = no
+  `Strict-Transport-Security` header; set it only behind HTTPS). See
+  `docs/security.md`. Docker Compose passes these two and
+  `MAX_STORED_RESPONSE_CHARS` to the containers; the other optional settings
+  are not passed yet.
 - Optional: `ADMIN_SECRET_KEY` (at least 32 characters, different from
   `JWT_SECRET_KEY`) turns the admin panel on; leave it empty to keep it off.
   Set `ADMIN_SESSION_COOKIE_SECURE=false` only for plain-HTTP development.
@@ -113,7 +121,7 @@ never a command-line argument and is at least 12 characters.
 ### Run
 
 ```bash
-python main.py API                       # API on API_HOST:API_PORT
+python main.py API                       # API on API_HOST:API_PORT (default 127.0.0.1:8000)
 taskiq worker taskiq_app:broker --fs-discover \
     --tasks-pattern "components/*/tasks.py"   # background worker
 ```
@@ -121,11 +129,20 @@ taskiq worker taskiq_app:broker --fs-discover \
 If RabbitMQ is unreachable the worker logs an `AMQPConnectionError` for the
 broker URL (password masked) and retries every 5 seconds.
 
+`API_HOST` defaults to `127.0.0.1` (loopback only) so a local run is not
+exposed to the network; set `API_HOST=0.0.0.0` to listen on all interfaces.
+The Compose `api` service sets it to `0.0.0.0` itself, since a published
+container port is unreachable from a loopback-only listener.
+
 The whole stack in containers (API, worker, PostgreSQL, RabbitMQ):
 
 ```bash
 docker compose up --build
 ```
+
+The image runs as the unprivileged user `app` (uid 10001), and Compose
+publishes PostgreSQL (5432) and RabbitMQ (5672, 15672) on `127.0.0.1` only;
+the API is published on 8000. See `docs/security.md`.
 
 The containers do not run migrations; apply `alembic upgrade head` against
 the database first (for the compose database from the host, use the
@@ -154,11 +171,14 @@ the database first (for the compose database from the host, use the
 | New migration | `alembic revision --autogenerate -m "message"` (review it before applying; register each component's `models` in `migrations/env.py`) |
 | Roll back one step | `alembic downgrade -1` or to a revision such as `alembic downgrade 0005`; downgrades can delete data, see [Migrations](docs/migrations.md) |
 | Create the first superadmin | `python cli.py create-superadmin --email <email>` |
-| All tests | `pytest` (integration tests need `DATABASE_URL` pointing at PostgreSQL) |
+| All tests | `pytest` (integration tests drop and create tables, so `DATABASE_URL` must point at a scratch PostgreSQL database whose name contains `test`; they refuse to run otherwise, see [Testing](docs/testing.md)) |
 | Tests without a database | `pytest -m "not integration"` |
 | Lint | `ruff check .` |
 | Format check | `black --check .` (use `black .` to format) |
 | Types | `mypy` |
+| Static security analysis | `poetry run bandit -c pyproject.toml -r -ll components api admin cli.py main.py taskiq_app.py migrations scripts` |
+| Dependency audit (needs network) | `poetry run pip-audit` |
+| Dynamic scan (OWASP ZAP) | throwaway instance only, see [Security](docs/security.md) |
 | All pre-commit hooks | `pre-commit run --all-files` |
 | Real-provider tests (opt-in, cost money) | see [Testing](docs/testing.md) |
 | Kan board helper | `scripts/kan.py`, see "Task tracking (Kan)" in `CLAUDE.md` |
@@ -367,3 +387,4 @@ Reference pages (moved out of this file; content unchanged):
 - [Migrations](docs/migrations.md)
 - [Quality checks and real-provider tests](docs/testing.md)
 - [Development agents](docs/development-agents.md)
+- [Security checks and findings register](docs/security.md)

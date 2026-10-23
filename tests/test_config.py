@@ -81,6 +81,22 @@ def test_llm_max_concurrency_default_and_minimum(
         SettingsSchema(_env_file=None)
 
 
+def test_max_stored_response_chars_default_and_minimum(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DB_URL)
+    monkeypatch.setenv("RABBITMQ_URL", MQ_URL)
+    monkeypatch.delenv("MAX_STORED_RESPONSE_CHARS", raising=False)
+    settings = SettingsSchema(_env_file=None)
+    assert settings.max_stored_response_chars == 1_000_000
+    monkeypatch.setenv("MAX_STORED_RESPONSE_CHARS", "500")
+    assert SettingsSchema(_env_file=None).max_stored_response_chars == 500
+    for bad in ("0", "-1", "abc"):
+        monkeypatch.setenv("MAX_STORED_RESPONSE_CHARS", bad)
+        with pytest.raises(ValidationError):
+            SettingsSchema(_env_file=None)
+
+
 def test_pricing_file_optional_and_blank_is_unset(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -168,6 +184,16 @@ def test_jwt_settings_defaults_and_masking(monkeypatch: MonkeyPatch) -> None:
 
 
 ADMIN_SECRET = "an-admin-secret-with-at-least-32-characters"
+
+
+def test_api_host_defaults_to_loopback(monkeypatch: MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.delenv("API_HOST", raising=False)
+
+    assert SettingsSchema(_env_file=None).api_host == "127.0.0.1"
+
+    monkeypatch.setenv("API_HOST", "0.0.0.0")
+    assert SettingsSchema(_env_file=None).api_host == "0.0.0.0"
 
 
 def test_admin_settings_defaults(monkeypatch: MonkeyPatch) -> None:

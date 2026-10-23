@@ -8,8 +8,18 @@ from collections.abc import Mapping
 
 from components.experiments.enums import ExperimentStatus, ResultStatus
 
-INPUT_TOKEN = "{input}"
-EXPECTED_OUTPUT_TOKEN = "{expected_output}"
+INPUT_TOKEN = (
+    "{input}"  # nosec B105 - prompt template placeholder, not a password
+)
+EXPECTED_OUTPUT_TOKEN = "{expected_output}"  # nosec B105 - prompt template placeholder, not a password
+# Bounds on rendered prompts, checked before any prompt is built. A template
+# may repeat ``{input}`` many times over many large cases, so the sizes of
+# the schema fields alone do not bound what one request stores. Constants
+# rather than settings: they protect the service itself and the service
+# takes no settings; 200k characters fits a maximal template plus a maximal
+# input and expected output.
+MAX_RENDERED_PROMPT_CHARS = 200_000
+MAX_TOTAL_RENDERED_CHARS = 100_000_000
 BACKOFF_CAP_SECONDS = 30.0
 BACKOFF_BASE_SECONDS = 1.0
 
@@ -34,6 +44,21 @@ def render_prompt(
         EXPECTED_OUTPUT_TOKEN: expected_output or "",
     }
     return _TOKEN_PATTERN.sub(lambda m: values[m.group(0)], template)
+
+
+def rendered_length(
+    template: str, input_text: str, expected_output: str | None
+) -> int:
+    """Length ``render_prompt`` would produce, without building the string."""
+    inputs = template.count(INPUT_TOKEN)
+    expecteds = template.count(EXPECTED_OUTPUT_TOKEN)
+    return (
+        len(template)
+        - inputs * len(INPUT_TOKEN)
+        - expecteds * len(EXPECTED_OUTPUT_TOKEN)
+        + inputs * len(input_text)
+        + expecteds * len(expected_output or "")
+    )
 
 
 def derive_final_status(

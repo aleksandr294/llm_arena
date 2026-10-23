@@ -47,6 +47,7 @@ def _runner(
     sleeps: Sleeps | None = None,
     max_concurrency: int = 4,
     lease_seconds: int = 600,
+    **extra: Any,
 ) -> ExperimentRunner:
     return ExperimentRunner(
         scope_of(factory),
@@ -55,6 +56,7 @@ def _runner(
         lease_seconds=lease_seconds,
         sleep=sleeps or Sleeps(),
         jitter=lambda: 0.0,
+        **extra,
     )
 
 
@@ -247,6 +249,34 @@ async def test_running_result_within_lease_is_not_taken(
         )
         await s.commit()
     await _runner(session_factory, llm).run(result_id)
+    assert llm.calls == []
+
+
+async def test_claim_without_started_at_is_an_internal_error(
+    session_factory: Factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    original = ExperimentResultRepository.claim
+
+    async def claim_without_start(
+        self: ExperimentResultRepository, *args: Any, **kwargs: Any
+    ) -> ExperimentResult | None:
+        row = await original(self, *args, **kwargs)
+        assert row is not None
+        row.started_at = None
+        return row
+
+    monkeypatch.setattr(
+        ExperimentResultRepository, "claim", claim_without_start
+    )
+    llm = FakeLLM()
+
+    with pytest.raises(RuntimeError, match="has no started_at"):
+        await _runner(session_factory, llm).run(result_id)
+
     assert llm.calls == []
 
 
@@ -636,3 +666,33 @@ async def test_no_session_or_transaction_is_open_during_the_model_call(
         "status": "running",  # the claim is already committed
     }
     assert (await _row(session_factory, result_id)).status == "succeeded"
+
+
+@pytest.mark.parametrize(
+    ("length", "truncated"),
+    [(5, False), (99, False), (100, False), (101, True), (5000, True)],
+)
+async def test_response_is_bounded_with_marker_and_flag(
+    session_factory: Factory, length: int, truncated: bool
+) -> None:
+    limit = 100
+    text = "x" * length
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    runner = _runner(
+        session_factory, FakeLLM([response(text)]), max_response_chars=limit
+    )
+    await runner.run(result_id)
+    row = await _row(session_factory, result_id)
+    assert row.status == ResultStatus.SUCCEEDED
+    assert row.response_truncated is truncated
+    assert row.response_text is not None
+    marker = runner_module.TRUNCATION_MARKER
+    if truncated:
+        assert len(row.response_text) == limit  # marker included
+        assert row.response_text.endswith(marker)
+        assert row.response_text.startswith("x" * (limit - len(marker)))
+    else:
+        assert row.response_text == text

@@ -19,7 +19,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 from starlette.routing import Mount
 
-from admin import mount_admin
+from admin import _export_environment, mount_admin
 from api.app import create_app
 from components.core.config import SettingsSchema, get_settings
 from conftest import TEST_JWT_SECRET
@@ -263,6 +263,18 @@ def test_invalid_admin_secret_fails_startup_without_echo(
     assert "admin_secret_key" in message
     assert secret not in message
     assert jwt_equal == ("differ" in message)
+
+
+def test_export_environment_requires_the_admin_secret() -> None:
+    settings = SettingsSchema(
+        database_url="postgresql+asyncpg://unused/unused",
+        rabbitmq_url="amqp://unused/",
+        jwt_secret_key=TEST_JWT_SECRET,
+        admin_secret_key=None,
+        _env_file=None,
+    )
+    with pytest.raises(RuntimeError, match="ADMIN_SECRET_KEY is not set"):
+        _export_environment(settings)
 
 
 def test_mount_admin_without_secret_returns_false() -> None:

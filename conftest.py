@@ -77,16 +77,17 @@ async def engine() -> AsyncIterator[AsyncEngine]:
 
     Only the tables of the component models are created and dropped (never
     ``Base.metadata`` as a whole, which also holds tables that test modules
-    register for themselves). Tests must never run against the main
-    database.
+    register for themselves). The URL must name a test database (see
+    ``tests.helpers``), so a developer database is never dropped.
     """
-    import components.auth.models  # noqa: F401
-    import components.datasets.models  # noqa: F401
-    import components.evaluation.models  # noqa: F401
-    import components.experiments.models  # noqa: F401
-    import components.organizations.models  # noqa: F401
+    import components.auth.models
+    import components.datasets.models
+    import components.evaluation.models
+    import components.experiments.models
+    import components.organizations.models
     import components.users.models  # noqa: F401
     from components.core.database import Base, create_engine
+    from tests.helpers import checked_database_url
 
     # Only mappers of ``components.*`` (all six model modules are imported
     # above) get created. A test that registers its own table must create
@@ -96,7 +97,7 @@ async def engine() -> AsyncIterator[AsyncEngine]:
         for mapper in Base.registry.mappers
         if mapper.class_.__module__.startswith("components.")
     ]
-    engine = create_engine(os.environ["DATABASE_URL"])
+    engine = create_engine(checked_database_url())
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all, tables=tables)
         await conn.run_sync(Base.metadata.create_all, tables=tables)

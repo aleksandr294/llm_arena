@@ -163,7 +163,7 @@ async def test_backfill_and_summary(session_factory: Factory) -> None:
     assert set(backlog) == {ids[0], ids[1]} and remaining == 0
     summary = await service.summary(ROOT, experiment_id)
     assert summary.unevaluated_results == 2
-    assert [e.model_dump() for e in summary.evaluators][0] == {
+    assert next(e.model_dump() for e in summary.evaluators) == {
         "id": "exact",
         "type": "exact_match",
         "version": 1,

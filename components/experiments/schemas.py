@@ -115,6 +115,7 @@ class ExperimentResultSchema(BaseModel):
     rendered_prompt: str
     attempts: int
     response_text: str | None
+    response_truncated: bool
     finish_reason: str | None
     provider_request_id: str | None
     reported_model: str | None

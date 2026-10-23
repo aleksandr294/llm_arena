@@ -91,7 +91,7 @@ def test_bearer_scheme_is_declared_and_only_public_routes_skip_it(
         "scheme": "bearer",
     }
     operations = _operations(app)
-    assert PUBLIC <= operations.keys()
+    assert operations.keys() >= PUBLIC
     for key, op in operations.items():
         if key in PUBLIC:
             assert not op.get("security"), key

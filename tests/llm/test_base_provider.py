@@ -19,7 +19,7 @@ def test_every_kind_has_expected_default() -> None:
     assert set(RETRYABLE) == set(LLMErrorKind)
 
 
-@pytest.mark.parametrize("kind,expected", list(RETRYABLE.items()))
+@pytest.mark.parametrize(("kind", "expected"), list(RETRYABLE.items()))
 def test_retryable_defaults(kind: LLMErrorKind, expected: bool) -> None:
     err = LLMProviderError(kind, ProviderName.OPENAI)
     assert err.retryable is expected

@@ -107,6 +107,10 @@ class ExperimentResult(Base):
     rendered_prompt: Mapped[str] = mapped_column(Text)
     attempts: Mapped[int] = mapped_column(default=0, server_default="0")
     response_text: Mapped[str | None] = mapped_column(Text, default=None)
+    # True when response_text was cut at MAX_STORED_RESPONSE_CHARS.
+    response_truncated: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
     finish_reason: Mapped[str | None] = mapped_column(String(64), default=None)
     provider_request_id: Mapped[str | None] = mapped_column(
         String(255), default=None

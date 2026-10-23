@@ -16,6 +16,7 @@ KAN_API_KEY and KAN_BOARD_ID are required, KAN_URL is optional.
 import argparse
 import json
 import os
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,11 @@ def load_env() -> dict[str, str]:
 
 class KanClient:
     def __init__(self, url: str, api_key: str, board_id: str) -> None:
+        scheme = urllib.parse.urlparse(url).scheme
+        if scheme not in ("http", "https"):
+            raise SystemExit(
+                f"KAN_URL must start with http:// or https://, got {url!r}"
+            )
         self.url = url
         self.api_key = api_key
         self.board_id = board_id
@@ -73,7 +79,9 @@ class KanClient:
                 "Content-Type": "application/json",
             },
         )
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(  # nosec B310 - scheme validated to http(s) in __init__
+            request
+        ) as response:
             return json.load(response)
 
     def lists(self) -> list[dict[str, Any]]:

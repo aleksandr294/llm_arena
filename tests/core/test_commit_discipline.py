@@ -5,6 +5,7 @@ endpoints against PostgreSQL (``DATABASE_URL``).
 """
 
 import ast
+import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -181,11 +182,9 @@ async def _asgi(
             status.append(message["status"])
             recorder.events.append("response.start")
 
-    try:
+    # The server error middleware sends the 500 and then re-raises.
+    with contextlib.suppress(Exception):
         await app(scope, receive, send)  # type: ignore[arg-type]
-    except Exception:
-        # The server error middleware sends the 500 and then re-raises.
-        pass
     return status[0]
 
 

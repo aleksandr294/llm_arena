@@ -68,7 +68,7 @@ async def test_superadmin_blocks_and_unblocks_an_organization(
     # Another organization is untouched.
     assert _rest_login(panel, emails["staff_c"])[0] == 200
 
-    status, text = _change(panel, "root", org, {"is_active": True})
+    status, _text = _change(panel, "root", org, {"is_active": True})
     assert status == 200
     assert await _is_active(engine, org) is True
     assert _rest_login(panel, emails["staff_a"])[0] == 200

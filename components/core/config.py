@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 JWT_SECRET_PLACEHOLDER: Final = "change-me-generate-a-random-secret-key"
 JWT_SECRET_MIN_LENGTH: Final = 32
 ADMIN_SECRET_MIN_LENGTH: Final = 32
+DEFAULT_MAX_STORED_RESPONSE_CHARS: Final = 1_000_000
+DEFAULT_MAX_REQUEST_BODY_BYTES: Final = 2 * 1024 * 1024
 
 
 class SettingsSchema(BaseSettings):
@@ -21,7 +23,8 @@ class SettingsSchema(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    api_host: str = "0.0.0.0"
+    # Loopback by default; containers set API_HOST=0.0.0.0 explicitly.
+    api_host: str = "127.0.0.1"
     api_port: int = 8000
     health_check_timeout_seconds: float = 2.0
 
@@ -46,11 +49,26 @@ class SettingsSchema(BaseSettings):
     # Serves Swagger UI, ReDoc and the OpenAPI schema when true.
     api_docs_enabled: bool = True
 
+    # Requests with a larger body are answered 413 before it is read in
+    # full (declared and chunked bodies alike).
+    max_request_body_bytes: int = Field(
+        default=DEFAULT_MAX_REQUEST_BODY_BYTES, ge=1
+    )
+    # Strict-Transport-Security max-age; 0 leaves the header off. Enable only
+    # when the API is served over HTTPS.
+    hsts_max_age_seconds: int = Field(default=0, ge=0)
+
     openai_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
 
     # Max simultaneous model requests per provider in one worker process.
     llm_max_concurrency: int = Field(default=4, ge=1)
+
+    # Longest model response stored per result, marker included, in
+    # characters. Longer output is cut and flagged as truncated.
+    max_stored_response_chars: int = Field(
+        default=DEFAULT_MAX_STORED_RESPONSE_CHARS, ge=1
+    )
 
     # Optional operator-supplied pricing file used to estimate costs. Blank
     # means unset; no prices are shipped.

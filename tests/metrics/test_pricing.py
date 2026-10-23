@@ -163,3 +163,22 @@ def test_example_file_is_valid() -> None:
     pricing = load_pricing("docs/pricing.example.json")
     assert pricing is not None
     assert "EXAMPLE" in pricing.version
+
+
+@pytest.mark.parametrize("content", [None, "not json"])
+def test_service_pricing_error_hides_the_path_and_logs_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, content: str | None
+) -> None:
+    from components.metrics.service import MetricsService
+
+    path = tmp_path / "secret-dir" / "pricing.json"
+    if content is not None:
+        path.parent.mkdir()
+        path.write_text(content)
+    service = MetricsService(None, str(path))  # type: ignore[arg-type]
+    with caplog.at_level("WARNING", logger="components.metrics.service"):
+        pricing, error = service._load_pricing()
+    assert pricing is None
+    assert error is not None
+    assert "secret-dir" not in error and str(tmp_path) not in error
+    assert str(path) in caplog.text

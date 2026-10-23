@@ -84,7 +84,8 @@ any cost.
   historical costs are recomputed from it, so change `version` whenever you
   change rates.
 - A missing or invalid file never fails the request: costs become `null` and
-  `pricing_error` names the file path and the reason (never its contents).
+  `pricing_error` gives the reason (never the file path or contents; the path
+  is written to the server log).
 
 ### Export formats
 
@@ -92,12 +93,13 @@ any cost.
   template, generation and retry settings, targets, evaluator configuration),
   `status`, `finished`, `comparison` (including the pricing used) and a
   `results` array with one entry per result (case position, target, status,
-  attempts, latency, tokens, error kind, evaluator outcomes and, with
+  attempts, latency, tokens, error kind, `response_truncated`, evaluator
+  outcomes and, with
   `include_responses`, `rendered_prompt` and `response_text`). Text is
   preserved exactly.
 - CSV has a header and one row per result: `case_position, provider, model,
   status, attempts, latency_ms, input_tokens, output_tokens, total_tokens,
-  error_kind`, one `eval:<evaluator id>` column per configured evaluator, and
+  error_kind, response_truncated` (`true` or `false`), one `eval:<evaluator id>` column per configured evaluator, and
   `response_text` when requested. Unknown values are empty cells.
 - CSV formula protection: a text cell (provider, model, status, error kind,
   evaluator outcome, response text) starting with `=`, `+`, `-`, `@`, a tab or

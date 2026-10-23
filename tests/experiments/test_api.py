@@ -180,6 +180,7 @@ async def test_status_counts_and_results_filter(
     assert ok["total"] == 2
     assert len(ok["items"]) == 1
     assert ok["items"][0]["response_text"] == "ok"
+    assert ok["items"][0]["response_truncated"] is False
 
 
 async def test_retry_failed_returns_202_only_failed(

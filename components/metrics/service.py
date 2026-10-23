@@ -4,6 +4,7 @@ Read-only: nothing is persisted, costs are computed at request time from the
 operator's pricing file. Logs, if any, must carry ids and counts only.
 """
 
+import logging
 import uuid
 from collections import defaultdict
 
@@ -51,6 +52,8 @@ from components.metrics.schemas import (
     TokenSumSchema,
     TokenUsageSchema,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _counts_from(statuses: dict[str, int]) -> ResultCountsSchema:
@@ -239,7 +242,12 @@ class MetricsService:
         try:
             return load_pricing(self._pricing_file), None
         except PricingConfigError as exc:
-            return None, str(exc)
+            # The path is operator configuration: it goes to the server log,
+            # never to the API caller.
+            logger.warning(
+                "Pricing file %r is unusable: %s", exc.path, exc.reason
+            )
+            return None, f"Pricing file is unusable: {exc.reason}"
 
     @staticmethod
     def _evaluator_config(experiment: Experiment) -> EvaluatorConfigSchema:

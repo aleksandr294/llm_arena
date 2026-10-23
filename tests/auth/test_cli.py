@@ -3,7 +3,6 @@ need PostgreSQL (``DATABASE_URL``)."""
 
 import asyncio
 import logging
-import os
 import sys
 import uuid
 from collections.abc import Iterator
@@ -29,6 +28,7 @@ from components.core.database import Base
 from components.core.enums import Role
 from components.users.models import User
 from tests.auth.helpers import MODELS
+from tests.helpers import checked_database_url
 
 pytestmark = pytest.mark.integration
 
@@ -38,7 +38,7 @@ runner = CliRunner()
 
 
 def _engine() -> AsyncEngine:
-    return create_async_engine(os.environ["DATABASE_URL"], poolclass=NullPool)
+    return create_async_engine(checked_database_url(), poolclass=NullPool)
 
 
 def _run_ddl(create: bool) -> None:

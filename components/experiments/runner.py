@@ -20,6 +20,7 @@ from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from components.core.config import DEFAULT_MAX_STORED_RESPONSE_CHARS
 from components.core.database import SessionScope
 from components.experiments.enums import ResultStatus
 from components.experiments.models import Experiment
@@ -52,6 +53,8 @@ HOOK_TIMEOUT_SECONDS = 10.0
 # Column sizes of experiment_results; provider values are untrusted.
 FINISH_REASON_MAX = 64
 IDENTIFIER_MAX = 255
+# Appended to a stored response that was cut at the size limit.
+TRUNCATION_MARKER = "\n[... response truncated ...]"
 
 Sleep = Callable[[float], Awaitable[None]]
 # Called with the result id after a succeeded outcome was stored.
@@ -85,7 +88,20 @@ def _clean(value: str | None, max_length: int) -> str | None:
 
 
 def _default_jitter() -> float:
-    return random.uniform(0, JITTER_MAX_SECONDS)
+    return random.uniform(  # nosec B311 - non-cryptographic retry jitter
+        0, JITTER_MAX_SECONDS
+    )
+
+
+def _bound_response(text: str, limit: int) -> tuple[str, bool]:
+    """Strip NUL bytes and fit ``limit`` characters, marker included.
+    Returns the text and whether it was cut; text within the limit is
+    returned unchanged."""
+    text = text.replace("\x00", "")
+    if len(text) <= limit:
+        return text, False
+    keep = max(limit - len(TRUNCATION_MARKER), 0)
+    return (text[:keep] + TRUNCATION_MARKER)[:limit], True
 
 
 class ExperimentRunner:
@@ -99,9 +115,13 @@ class ExperimentRunner:
         sleep: Sleep = asyncio.sleep,
         jitter: Callable[[], float] = _default_jitter,
         on_succeeded: OnSucceeded | None = None,
+        max_response_chars: int = DEFAULT_MAX_STORED_RESPONSE_CHARS,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least 1")
+        if max_response_chars < 1:
+            raise ValueError("max_response_chars must be at least 1")
+        self._max_response_chars = max_response_chars
         self._scope = scope
         self._llm = llm_service
         self._max_concurrency = max_concurrency
@@ -140,7 +160,10 @@ class ExperimentRunner:
             if experiment is None:  # cannot happen: FK cascade
                 await session.rollback()
                 return None
-            assert claimed.started_at is not None  # set by the claim
+            if claimed.started_at is None:  # the claim always sets it
+                raise RuntimeError(
+                    f"claimed result {result_id} has no started_at"
+                )
             work = _Work(
                 experiment_id=claimed.experiment_id,
                 target=ModelTargetSchema(
@@ -212,14 +235,24 @@ class ExperimentRunner:
                     attempts,
                 )
 
-    @staticmethod
-    def _success(response: LLMResponseSchema, attempts: int) -> _Outcome:
+    def _success(self, response: LLMResponseSchema, attempts: int) -> _Outcome:
         usage = response.usage
+        text, truncated = _bound_response(
+            response.text, self._max_response_chars
+        )
+        if truncated:
+            # Counts only: the content is untrusted and never logged.
+            logger.warning(
+                "response truncated (original_chars=%d, stored_chars=%d)",
+                len(response.text),
+                len(text),
+            )
         return _Outcome(
             ResultStatus.SUCCEEDED,
             {
                 "attempts": attempts,
-                "response_text": response.text.replace("\x00", ""),
+                "response_text": text,
+                "response_truncated": truncated,
                 "finish_reason": _clean(
                     response.finish_reason, FINISH_REASON_MAX
                 ),

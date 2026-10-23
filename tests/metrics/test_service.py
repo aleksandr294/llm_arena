@@ -52,7 +52,11 @@ async def _comparison(
 
 
 async def test_summary_mixed_statuses(session_factory: Factory) -> None:
-    rows = [Row(1), Row(2), Row(3), Row(4, status="failed")] + [
+    rows = [
+        Row(1),
+        Row(2),
+        Row(3),
+        Row(4, status="failed"),
         Row(5, status="pending"),
         Row(6, status="pending"),
     ]
@@ -233,7 +237,9 @@ async def test_invalid_pricing_keeps_other_metrics(
     experiment_id = await seed(session_factory, rows)
     path = _pricing(tmp_path, input_rate=-1)
     comp = await _comparison(session_factory, experiment_id, path)
-    assert comp.pricing_error is not None and path in comp.pricing_error
+    assert comp.pricing_error is not None
+    assert path not in comp.pricing_error
+    assert str(tmp_path) not in comp.pricing_error
     target = comp.targets[0]
     assert target.cost.estimated_cost is None
     assert target.error_rate == 0.5

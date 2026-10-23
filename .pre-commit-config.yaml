@@ -18,3 +18,9 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+      - id: bandit
+        name: bandit
+        entry: poetry run bandit -c pyproject.toml -ll -q -r
+        language: system
+        types: [python]
+        exclude: ^tests/

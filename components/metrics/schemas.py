@@ -108,7 +108,8 @@ class ComparisonSchema(BaseModel):
     experiment_status: str
     finished: bool
     pricing: PricingInfoSchema
-    # Names the pricing file and reason when it is unusable.
+    # The reason (never the file path or contents) when the pricing file is
+    # unusable.
     pricing_error: str | None = None
     targets: list[TargetComparisonSchema]
 

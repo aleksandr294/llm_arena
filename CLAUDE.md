@@ -215,7 +215,7 @@ Follow the repository's OpenSpec workflow for meaningful behavioral changes.
 4. Break work into small, verifiable tasks.
 5. Start every new feature on a new branch created from an up-to-date `main` (for example `feat/<change-name>`), before writing any code or OpenSpec artifacts. Never work on a feature directly on `main` or reuse a previous feature's branch. Use a dedicated branch for each task or logically cohesive implementation block.
 6. Implement the approved scope and add regression tests.
-7. Run relevant tests, linting, formatting, and type checks.
+7. Run relevant tests, linting, formatting, and type checks, plus the security gates in the Security section.
 8. Request independent code review and address valid findings.
 9. When the flow is finished, commit the changes on the feature branch following the `git-conventional-commits` skill. Do not push; pushing the branch and opening a pull request happen only when the user explicitly asks.
 10. Report the implementation, checks, limitations, and unresolved issues.
@@ -245,6 +245,8 @@ Use a proportionate workflow for documentation-only changes and refactoring that
 - Keep real-provider tests separate and explicitly configured.
 - Test timeouts, rate limits, malformed responses, retries, duplicate task delivery, and partial experiment failures.
 - Verify that reported metrics match persisted data.
+- Integration tests drop and create tables: `DATABASE_URL` must name a test database (name contains `test`), see `docs/testing.md`.
+- Any new sink of untrusted text (prompts, exports, logs, panel, evaluators) gets hostile-input tests using the corpus in `tests/security/helpers.py`.
 - Never claim tests passed unless they were actually executed successfully.
 
 ## Security
@@ -254,6 +256,9 @@ Use a proportionate workflow for documentation-only changes and refactoring that
 - Validate imported datasets and external provider responses.
 - Protect access to experiment data and stored credentials.
 - Treat imported test cases and model outputs as untrusted data.
+- Quality gates: Bandit at medium severity and above must be clean (command in `docs/security.md`); `poetry run pip-audit` must be clean or every finding explained (record it as not run, never as passed, when offline).
+- A `# nosec` needs a reason in the same comment (enforced by `tests/security/test_nosec_reasons.py`).
+- Update the findings register in `docs/security.md` whenever a scan or review produces a finding.
 
 ## Completion Report
 

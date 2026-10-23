@@ -522,7 +522,7 @@ async def test_deactivation_ends_sessions(world: World) -> None:
 async def test_password_change_ends_sessions_and_swaps_password(
     world: World,
 ) -> None:
-    access, refresh = await _staff_session(world)
+    _access, refresh = await _staff_session(world)
     response = await world.client.patch(
         f"{URL}/{world.staff_a.user_id}",
         json={"password": NEW_PASSWORD},
