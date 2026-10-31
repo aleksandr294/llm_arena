@@ -15,12 +15,14 @@ from pydantic import (
 
 from components.core.utils import reject_nul
 from components.evaluation.enums import OutcomeStatus
+from components.third_party.llm.enums import ProviderName
 
 MAX_EVALUATORS = 20
 MAX_VALUES = 20
 VALUE_MAX = 1000
 MAX_FIELD_PATHS = 50
 PATH_MAX = 200
+CRITERIA_MAX = 2000
 
 JsonType = Literal[
     "string", "number", "integer", "boolean", "array", "object", "null"
@@ -52,6 +54,16 @@ EvaluatorIdStr = Annotated[
 ValueStr = Annotated[
     str,
     StringConstraints(min_length=1, max_length=VALUE_MAX),
+    AfterValidator(reject_nul),
+]
+CriteriaStr = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=CRITERIA_MAX),
+    AfterValidator(reject_nul),
+]
+JudgeModelStr = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=200),
     AfterValidator(reject_nul),
 ]
 FieldPathStr = Annotated[
@@ -118,6 +130,15 @@ class JsonFieldsParams(_Params):
         return self
 
 
+class LlmJudgeParams(_Params):
+    """A judge call is independent of the experiment's own target models:
+    its provider and model are set here, not inherited."""
+
+    criteria: CriteriaStr
+    provider: ProviderName
+    model: JudgeModelStr
+
+
 class _Entry(_Params):
     id: EvaluatorIdStr
 
@@ -146,13 +167,18 @@ class JsonFieldsEntry(_Entry, JsonFieldsParams):
     type: Literal["json_fields"]
 
 
+class LlmJudgeEntry(_Entry, LlmJudgeParams):
+    type: Literal["llm_judge"]
+
+
 EvaluatorEntry = Annotated[
     ExactMatchEntry
     | ContainsEntry
     | NotContainsEntry
     | LengthBetweenEntry
     | JsonValidEntry
-    | JsonFieldsEntry,
+    | JsonFieldsEntry
+    | LlmJudgeEntry,
     Field(discriminator="type"),
 ]
 
@@ -238,11 +264,14 @@ class EvaluationEnqueueSchema(BaseModel):
 
 @dataclass(frozen=True)
 class EvaluationInput:
-    """Everything the evaluate task needs, read in one query."""
+    """Everything the evaluate task needs, read in one query. ``case_input``
+    is read for the llm_judge evaluator only; deterministic evaluators
+    ignore it."""
 
     result_id: uuid.UUID
     experiment_id: uuid.UUID
     status: str
     response_text: str | None
+    case_input: str
     expected_output: str | None
     evaluator_config: dict[str, Any]

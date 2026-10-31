@@ -33,11 +33,36 @@ def test_empty_configuration_means_no_evaluators(raw: dict[str, Any]) -> None:
         {"id": "f", "type": "json_fields", "required": ["a.b"]},
         {"id": "f", "type": "json_fields", "types": {"a": "integer"}},
         _entry(id="x" * 64),
+        {
+            "id": "j",
+            "type": "llm_judge",
+            "criteria": "response must be polite",
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+        },
     ],
 )
 def test_valid_entries(entry: dict[str, Any]) -> None:
     config = parse_evaluator_config({"evaluators": [entry]})
     assert len(config.evaluators) == 1
+
+
+def test_llm_judge_alongside_a_deterministic_evaluator() -> None:
+    config = parse_evaluator_config(
+        {
+            "evaluators": [
+                _entry(),
+                {
+                    "id": "j",
+                    "type": "llm_judge",
+                    "criteria": "response must be factually correct",
+                    "provider": "anthropic",
+                    "model": "claude-test",
+                },
+            ]
+        }
+    )
+    assert [e.type for e in config.evaluators] == ["exact_match", "llm_judge"]
 
 
 def test_defaults_are_filled_into_normalized_dump() -> None:
@@ -189,6 +214,56 @@ def _loc(raw: dict[str, Any]) -> tuple[Any, ...]:
                 ]
             },
             ("evaluators", 0, "json_fields", "types", "a"),
+        ),
+        (
+            {
+                "evaluators": [
+                    {"id": "j", "type": "llm_judge", "provider": "openai"}
+                ]
+            },
+            ("evaluators", 0, "llm_judge"),
+        ),
+        (
+            {
+                "evaluators": [
+                    {
+                        "id": "j",
+                        "type": "llm_judge",
+                        "criteria": "x",
+                        "provider": "mistral",
+                        "model": "m",
+                    }
+                ]
+            },
+            ("evaluators", 0, "llm_judge", "provider"),
+        ),
+        (
+            {
+                "evaluators": [
+                    {
+                        "id": "j",
+                        "type": "llm_judge",
+                        "criteria": "x" * 2001,
+                        "provider": "openai",
+                        "model": "m",
+                    }
+                ]
+            },
+            ("evaluators", 0, "llm_judge", "criteria"),
+        ),
+        (
+            {
+                "evaluators": [
+                    {
+                        "id": "j",
+                        "type": "llm_judge",
+                        "criteria": "",
+                        "provider": "openai",
+                        "model": "m",
+                    }
+                ]
+            },
+            ("evaluators", 0, "llm_judge", "criteria"),
         ),
     ],
 )

@@ -3,22 +3,44 @@
 import asyncio
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
 from sqlalchemy import select
 
 from components.evaluation import evaluators
+from components.evaluation.dependencies import build_evaluation_service
 from components.evaluation.models import EvaluationResult
 from components.evaluation.repository import EvaluationRepository
+from components.evaluation.service import EvaluationService
 from components.experiments.enums import ResultStatus
 from components.experiments.exceptions import ExperimentNotFoundError
 from components.experiments.models import ExperimentResult
+from components.third_party.llm.enums import LLMErrorKind
 from tests.access import ROOT
 from tests.evaluation.helpers import ScopedEvaluation
 from tests.evaluation.test_repository import Factory, _setup
+from tests.experiments.helpers import (
+    FakeLLM,
+    provider_error,
+    response,
+    scope_of,
+)
 
 pytestmark = pytest.mark.integration
+
+JUDGE_CONFIG: dict[str, Any] = {
+    "evaluators": [
+        {
+            "id": "judge",
+            "type": "llm_judge",
+            "criteria": "must be polite",
+            "provider": "openai",
+            "model": "m",
+        }
+    ]
+}
 
 CONFIG: dict[str, Any] = {
     "evaluators": [
@@ -269,3 +291,139 @@ async def test_concurrent_evaluation_stores_one_row_per_evaluator(
     assert sum(inserted) == 2
     rows = await _rows(session_factory)
     assert [r.evaluator_id for r in rows] == ["exact", "has_r"]
+
+
+def _judge_service(
+    session_factory: Factory, llm: FakeLLM, sleep: Any = None
+) -> EvaluationService:
+    kwargs: dict[str, Any] = {
+        "scope": scope_of(session_factory),
+        "llm_service": llm.as_service(),
+    }
+    if sleep is not None:
+        kwargs["sleep"] = sleep
+    return EvaluationService(**kwargs)
+
+
+async def _no_sleep(_: float) -> None:
+    return None
+
+
+async def test_deterministic_only_makes_no_judge_call(
+    session_factory: Factory,
+) -> None:
+    """The common case (no llm_judge configured) must behave exactly as
+    before: no provider call, deterministic rows stored as usual."""
+    ids = await _make(session_factory)
+    llm = FakeLLM()
+    service = _judge_service(session_factory, llm)
+    assert await service.evaluate_result(ids[1]) == 2
+    assert llm.calls == []
+    rows = await _rows(session_factory)
+    assert [r.evaluator_id for r in rows] == ["exact", "has_r"]
+
+
+async def test_judge_passes(session_factory: Factory) -> None:
+    ids = await _make(session_factory, config=JUDGE_CONFIG)
+    llm = FakeLLM([response(text="PASS, well done.")])
+    service = _judge_service(session_factory, llm)
+    assert await service.evaluate_result(ids[1]) == 1
+    rows = await _rows(session_factory)
+    assert (rows[0].evaluator_id, rows[0].status) == ("judge", "passed")
+    assert rows[0].evaluator_type == "llm_judge"
+    # The prompt carries the response and case input; nothing is stored
+    # back into the outcome's own details.
+    assert rows[0].details == {"reason": "judge_verdict"}
+    target, prompt, kwargs = llm.calls[0]
+    assert target.provider.value == "openai"
+    assert kwargs["temperature"] == 0
+    assert "r2" in prompt  # the response being judged (see _setup)
+
+
+async def test_judge_fails(session_factory: Factory) -> None:
+    ids = await _make(session_factory, config=JUDGE_CONFIG)
+    llm = FakeLLM([response(text="FAIL: rude tone.")])
+    service = _judge_service(session_factory, llm)
+    await service.evaluate_result(ids[1])
+    rows = await _rows(session_factory)
+    assert rows[0].status == "failed"
+
+
+async def test_judge_retried_then_succeeds(session_factory: Factory) -> None:
+    ids = await _make(session_factory, config=JUDGE_CONFIG)
+    llm = FakeLLM(
+        [
+            provider_error(LLMErrorKind.RATE_LIMIT, retry_after=0),
+            response(text="PASS"),
+        ]
+    )
+    service = _judge_service(session_factory, llm, sleep=_no_sleep)
+    await service.evaluate_result(ids[1])
+    rows = await _rows(session_factory)
+    assert rows[0].status == "passed"
+    assert len(llm.calls) == 2
+
+
+async def test_judge_non_retryable_provider_error(
+    session_factory: Factory,
+) -> None:
+    ids = await _make(session_factory, config=JUDGE_CONFIG)
+    llm = FakeLLM([provider_error(LLMErrorKind.AUTHENTICATION)])
+    service = _judge_service(session_factory, llm)
+    await service.evaluate_result(ids[1])
+    rows = await _rows(session_factory)
+    assert rows[0].status == "error"
+    assert rows[0].details == {
+        "reason": "judge_call_failed",
+        "error_kind": "authentication",
+    }
+    assert len(llm.calls) == 1  # never retried
+
+
+async def test_judge_unparseable_response_is_error_not_guessed(
+    session_factory: Factory,
+) -> None:
+    ids = await _make(session_factory, config=JUDGE_CONFIG)
+    llm = FakeLLM([response(text="This is a nuanced case, hard to say.")])
+    service = _judge_service(session_factory, llm)
+    await service.evaluate_result(ids[1])
+    rows = await _rows(session_factory)
+    assert rows[0].status == "error"
+    assert rows[0].details == {"reason": "unparseable_verdict"}
+
+
+async def test_no_session_open_during_the_judge_call(
+    session_factory: Factory,
+) -> None:
+    """The judge call must happen with no database session open: a
+    session acquired during the call would mean a transaction held open
+    across a slow external call, the exact anti-pattern this change's
+    design explicitly avoids."""
+    ids = await _make(session_factory, config=JUDGE_CONFIG)
+    open_sessions = 0
+    real_scope = scope_of(session_factory)
+
+    @asynccontextmanager
+    async def _tracked() -> Any:
+        nonlocal open_sessions
+        open_sessions += 1
+        try:
+            async with real_scope() as session:
+                yield session
+        finally:
+            open_sessions -= 1
+
+    def tracked_scope() -> Any:
+        return _tracked()
+
+    llm = FakeLLM()
+
+    async def handler(_: str) -> Any:
+        assert open_sessions == 0, "a session was open during the judge call"
+        return response(text="PASS")
+
+    llm.handler = handler
+    service = build_evaluation_service(
+        scope=tracked_scope, llm_service=llm.as_service()
+    )
+    assert await service.evaluate_result(ids[1]) == 1

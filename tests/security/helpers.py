@@ -4,7 +4,9 @@ Every sample carries ``MARK`` so a test can prove that no log record,
 error message or foreign row ever contains hostile text. Samples are plain
 strings below ``SMALL_LIMIT`` characters (valid for names and inputs) and
 never contain NUL, which has its own constants because PostgreSQL text
-cannot hold it. A future LLM-as-a-judge feature must run this corpus too.
+cannot hold it. The LLM-as-a-judge evaluator (``llm_judge``) runs this
+corpus against its prompt building and verdict parsing; see
+``tests/evaluation/test_judge.py``.
 """
 
 import uuid

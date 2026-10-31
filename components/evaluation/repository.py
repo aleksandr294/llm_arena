@@ -35,7 +35,7 @@ class EvaluationRepository(BaseRepository[EvaluationResult]):
         return len(inserted.all())
 
     async def get_input(self, result_id: uuid.UUID) -> EvaluationInput | None:
-        """Read a result with its case's expected output and its
+        """Read a result with its case's input and expected output and its
         experiment's frozen evaluator configuration."""
         row = (
             await self.session.execute(
@@ -44,6 +44,7 @@ class EvaluationRepository(BaseRepository[EvaluationResult]):
                     ExperimentResult.experiment_id,
                     ExperimentResult.status,
                     ExperimentResult.response_text,
+                    TestCase.input,
                     TestCase.expected_output,
                     Experiment.evaluator_config,
                 )
