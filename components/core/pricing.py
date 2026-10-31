@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from components.metrics.exceptions import PricingConfigError
+from components.core.exceptions import PricingConfigError
 
 TOKENS_PER_UNIT = Decimal(1_000_000)
 

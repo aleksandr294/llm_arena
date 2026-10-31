@@ -11,6 +11,13 @@ from collections import defaultdict
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from components.core.exceptions import PricingConfigError
+from components.core.pricing import (
+    PricingFileSchema,
+    estimate_cost,
+    find_rate,
+    load_pricing,
+)
 from components.core.schemas import Principal
 from components.evaluation.schemas import (
     EvaluatorConfigSchema,
@@ -24,13 +31,6 @@ from components.experiments.repository import (
     ExperimentResultRepository,
 )
 from components.experiments.schemas import ExperimentConfigSchema
-from components.metrics.exceptions import PricingConfigError
-from components.metrics.pricing import (
-    PricingFileSchema,
-    estimate_cost,
-    find_rate,
-    load_pricing,
-)
 from components.metrics.repository import (
     MetricsRepository,
     TargetAggregate,
