@@ -50,6 +50,15 @@ poetry run pip-audit
 Result on 2026-10-18 (database reachable): `No known vulnerabilities found`.
 No package was upgraded and no exception was needed.
 
+Result on 2026-10-31 (after adding `prometheus-client`, database reachable):
+26 findings, all in `certifi`, `filelock` and `virtualenv` — transitive
+dev-tooling dependencies (`pre-commit`'s `virtualenv`/`filelock`; `certifi`
+via `httpx`/`httpcore`/`requests`), none from `prometheus-client` or any
+other production dependency. None reach the production image: the
+Dockerfile installs with `poetry install --only main --no-root`, which
+never installs the `dev` group. No package was upgraded; see the findings
+register.
+
 ## HTTP hardening
 
 One pure ASGI middleware (`api/middleware.py`) wraps the whole app,
@@ -303,6 +312,7 @@ applicable.
 | Bandit B105 | Low | `components/experiments/utils.py` (`INPUT_TOKEN`) | Justified: prompt template placeholder, not a password (`# nosec B105` with reason) |
 | Bandit B105 | Low | `components/experiments/utils.py` (`EXPECTED_OUTPUT_TOKEN`) | Justified: prompt template placeholder, not a password (`# nosec B105` with reason) |
 | pip-audit | n/a | all locked dependencies (`poetry run pip-audit`, 2026-10-18) | No findings: the run reported `No known vulnerabilities found`; nothing to upgrade, no package versions changed |
+| pip-audit | Low | `certifi`, `filelock`, `virtualenv` (`poetry run pip-audit`, 2026-10-31) | Accepted: 26 findings, all in dev-tooling transitive dependencies (`pre-commit`'s `virtualenv`/`filelock`; `certifi` via `httpx`/`httpcore`/`requests`), none from `prometheus-client`. None reach the production image (`poetry install --only main --no-root` in the `Dockerfile`) |
 | OWASP A07, API2, API4 | Medium | `components/auth/service.py` (login, refresh) | Follow-up card: no login throttling or lockout (REST and admin panel); mitigated by the documented proxy limit in `docs/authentication.md` and the bounded password-hash concurrency |
 | OWASP A09 | Medium | `components/auth/service.py`, `admin/__init__.py` | Follow-up card: failed logins, token reuse, permission denials and admin actions are not logged and there is no audit trail |
 | OWASP A04, API4, API6 | Medium | `components/experiments/service.py` | Follow-up card: no per-tenant quota or spend cap on experiments |
@@ -311,6 +321,7 @@ applicable.
 | OWASP A05, API8 | Low | `api/app.py` | Accepted: Swagger UI and ReDoc are on by default for developers; `API_DOCS_ENABLED=false` turns them off (`tests/core/test_openapi.py::test_docs_can_be_turned_off`) |
 | OWASP A08 | Low | build and release | Accepted: no CI, image signing or SBOM in this project |
 | OWASP A07 | Low | authentication | Accepted: no MFA; passwords and bearer tokens only |
+| OWASP A05, A01 | Low | `docker-compose.yml` (`promtail` service) | Accepted: Promtail mounts `/var/run/docker.sock` read-only to discover container logs (`docker_sd_configs`); `:ro` only blocks writes to the socket file, not which Docker API calls can be made over it, so this is effectively root-equivalent host access. Dev-only, localhost-bound stack. Follow-up: a read-only Docker API proxy sidecar before any non-local use |
 | ZAP 10038 | Medium | `GET /docs` (Swagger UI), `GET /admin/` (panel) | Fixed (verified by re-scan 2026-10-19; the panel now only raises 10055, next row): `Content-Security-Policy` on every response, page policies with hashed inline scripts for `/docs`, `/redoc` and `/admin` (`tests/core/test_middleware.py::test_documentation_pages_policy_covers_their_sources`, `tests/core/test_middleware.py::test_admin_panel_policy_covers_its_sources`, `tests/core/test_middleware.py::test_non_html_responses_get_the_strict_policy`) |
 | ZAP 10055 | Medium | `GET /admin/` (`style-src 'unsafe-inline'`) | Accepted: the panel UI needs inline styles, which CSP cannot allow by hash; scripts stay limited to `'self'` and one hashed inline script (`api/middleware.py`). Follow-up: replace or patch the panel UI to drop `'unsafe-inline'` |
 | ZAP 90003 / 10017 | Medium / Low | `GET /docs`, `GET /redoc` (`cdn.jsdelivr.net`, ReDoc also Google Fonts) | Accepted: the CDN script and stylesheet have no `integrity` attribute. Reasons: the docs are a developer convenience that `API_DOCS_ENABLED=false` removes, the CSP limits the page to that one CDN origin, and the version is pinned to the `@5` major (FastAPI's default). Follow-up: pin an exact version with SRI hashes or serve the assets locally |

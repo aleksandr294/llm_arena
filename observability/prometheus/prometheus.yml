@@ -1,0 +1,17 @@
+# Scrapes the API's /metrics (HTTP request metrics, api/metrics.py) and
+# the worker's /metrics (task and model-call metrics, both registered on
+# components.core.worker_metrics.WORKER_METRICS_REGISTRY and served by a
+# single prometheus_client HTTP server started at worker startup).
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+
+  - job_name: worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["worker:9100"]

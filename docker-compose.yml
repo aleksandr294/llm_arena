@@ -6,6 +6,8 @@ x-app-environment: &app-environment
   HSTS_MAX_AGE_SECONDS: ${HSTS_MAX_AGE_SECONDS:-0}
   MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-2097152}
   MAX_STORED_RESPONSE_CHARS: ${MAX_STORED_RESPONSE_CHARS:-1000000}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  WORKER_METRICS_PORT: ${WORKER_METRICS_PORT:-9100}
 
 x-app: &app
   build: .
@@ -35,9 +37,20 @@ services:
 
   worker:
     <<: *app
+    # --workers 1: Taskiq's default forks 2 child processes, each with its
+    # own in-memory metrics registry, and each would try to bind the same
+    # metrics port. Concurrency within the one process is still bounded by
+    # ExperimentRunner's per-provider semaphore (LLM_MAX_CONCURRENCY) and
+    # Taskiq's own --max-async-tasks, not by the process count. Scaling to
+    # several worker processes needs prometheus_client's multiprocess mode
+    # (PROMETHEUS_MULTIPROC_DIR) instead — not implemented; tracked as
+    # tech debt alongside true TTFT (see docs/observability.md).
     command: >
       taskiq worker taskiq_app:broker --fs-discover
-      --tasks-pattern "components/*/tasks.py"
+      --tasks-pattern "components/*/tasks.py" --workers 1
+    # Task and model-call metrics (components/core/worker_metrics.py),
+    # scraped by prometheus below.
+    ports: ["127.0.0.1:9100:9100"]
 
   postgres:
     image: postgres:17
@@ -63,3 +76,70 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  # --- Observability (dev/local): logs via Loki/Promtail, metrics via
+  # Prometheus, both visualized in Grafana. See docs/observability.md.
+  loki:
+    image: grafana/loki:3.3.2
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    security_opt: ["no-new-privileges:true"]
+    ports: ["127.0.0.1:3100:3100"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    command: ["-config.file=/etc/promtail/config.yml"]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      # ":Z" relabels for SELinux-enforcing hosts; a no-op elsewhere.
+      - ./observability/promtail/config.yml:/etc/promtail/config.yml:ro,Z
+      # Read-only access to discover and read the api/worker containers'
+      # JSON logs; Promtail never writes to the Docker API.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+    ports: ["127.0.0.1:9090:9090"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    security_opt: ["no-new-privileges:true"]
+    # Default admin/admin login (Grafana's own default; change it after
+    # first sign-in). Not exposed beyond localhost.
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro,Z
+      - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards/json:ro,Z
+    # Mapped to 3001 on the host: 3000 is already used by the Kan board
+    # (see CLAUDE.md); Grafana still listens on its default 3000 inside
+    # the container.
+    ports: ["127.0.0.1:3001:3000"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      loki:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy

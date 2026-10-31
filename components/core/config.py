@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Final
+from typing import Final, Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,6 +27,11 @@ class SettingsSchema(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     health_check_timeout_seconds: float = 2.0
+    # Passed to the root logger; the handler is JSON regardless of level.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    # Serves task and model-call metrics in the worker process; bound to
+    # loopback like the other infra ports.
+    worker_metrics_port: int = Field(default=9100, ge=1, le=65535)
 
     database_url: SecretStr
     rabbitmq_url: SecretStr

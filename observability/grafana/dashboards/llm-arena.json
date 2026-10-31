@@ -1,0 +1,92 @@
+{
+  "title": "LLM Arena - Starter",
+  "uid": "llm-arena-starter",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP 500 count",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(increase(http_requests_total{status=\"500\"}[5m]))",
+          "legendFormat": "500s"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "HTTP request latency (p95)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Task latency (p95)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(task_duration_seconds_bucket[5m])) by (le, task_name))",
+          "legendFormat": "{{task_name}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Failed-task count",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(increase(task_runs_total{outcome=\"failed\"}[5m])) by (task_name)",
+          "legendFormat": "{{task_name}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Model calls: latency, generation speed, cost",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 16 },
+      "description": "Generation speed is output_tokens / total call latency, an approximation, not a true time-to-first-token measurement (see openspec/specs/observability).",
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(model_call_latency_seconds_bucket[5m])) by (le, provider, model))",
+          "legendFormat": "p95 latency {{provider}}/{{model}}"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(model_call_generation_speed_tokens_per_second_sum[5m])) by (provider, model) / sum(rate(model_call_generation_speed_tokens_per_second_count[5m])) by (provider, model)",
+          "legendFormat": "avg tok/s {{provider}}/{{model}}"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(model_call_cost_estimate_total[5m])) by (provider, model, currency)",
+          "legendFormat": "cost/s {{provider}}/{{model}} ({{currency}})"
+        }
+      ]
+    }
+  ]
+}
