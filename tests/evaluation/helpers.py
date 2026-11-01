@@ -1,6 +1,7 @@
 """Test helper: calls ``EvaluationService`` the way an entry point does."""
 
 import uuid
+from functools import partial
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -22,10 +23,13 @@ class ScopedEvaluation:
         self._factory = factory
 
     async def evaluate_result(self, result_id: uuid.UUID) -> int:
-        async with session_scope(self._factory) as session:
-            return await build_evaluation_service(session).evaluate_result(
-                result_id
-            )
+        # evaluate_result manages its own scope() calls (one per phase, see
+        # EvaluationService's docstring), so it gets a scope here instead of
+        # a pre-opened session, like the real task entry point.
+        service = build_evaluation_service(
+            scope=partial(session_scope, self._factory)
+        )
+        return await service.evaluate_result(result_id)
 
     async def backfill(
         self,

@@ -2,12 +2,16 @@
 
 [Back to the README](../README.md)
 
-Evaluation judges stored responses with deterministic checks. It is separate
-from generation: an evaluation never changes a result's text or status, and
-no model is called. Evaluators run in the worker (`evaluation.evaluate_result`,
-one task per succeeded result) right after a result succeeds, and their
-outcomes are stored as one row per result and evaluator. Failed or cancelled
-generations are not evaluated.
+Evaluation judges stored responses with deterministic checks, and
+optionally an LLM-as-a-judge evaluator. It is separate from generation: an
+evaluation never changes a result's text or status. Evaluators run in the
+worker (`evaluation.evaluate_result`, one task per succeeded result) right
+after a result succeeds, and their outcomes are stored as one row per
+result and evaluator. Failed or cancelled generations are not evaluated.
+Deterministic evaluators make no model call and run in one short
+transaction; an `llm_judge` evaluator does call a model, with no database
+session held open during that call, and is persisted separately
+afterward.
 
 ### Evaluator configuration
 
@@ -43,6 +47,7 @@ indexes or paths, never response text.
 | `length_between` | `min_length`, `max_length` (characters; at least one required) | `passed` (`in_range`) or `failed` (`too_short`, `too_long`), with `length` |
 | `json_valid` | `require_object` (false) | the stripped response must be strict JSON (no `NaN`); `failed` reasons `invalid_json`, `contains_nul`, `too_deep`, `not_object` |
 | `json_fields` | `required` (dot paths), `types` (dot path to `string`, `number`, `integer`, `boolean`, `array`, `object` or `null`); one of them is required | the response must be a JSON object; `failed` with the lists `missing` and `mistyped`, or the `json_valid` reasons. Paths walk object keys only; booleans are not numbers |
+| `llm_judge` | `criteria` (free text, 1-2000 characters, required), `provider`, `model` (the judge's own target, independent of the experiment's target models) | a model call graded against `criteria`; `passed` or `failed` only — never a numeric score. `error` (`judge_call_failed` with `error_kind`) on a provider failure after one retry on a retryable error, or (`unparseable_verdict`) when the model's reply cannot be read as a verdict. `details` never holds the judge's own explanation or any of the response/input/expected-output text it was given — see [Security](#security) below |
 
 Invalid configuration returns 422 with the path in `loc`, for example
 `["body", "evaluator_config", "evaluators", 1]` for an unknown type,
@@ -92,5 +97,22 @@ outcome for at least one configured evaluator, so a non-zero value means
 evaluation is pending or `evaluate` is needed. Unknown experiment `404`;
 invalid pagination, filter value or id `422`.
 
-Not included: regular expressions, JSON Schema validation, LLM-as-a-judge,
-and overall scores (per-evaluator pass rates are in the metrics API).
+Not included: regular expressions, JSON Schema validation, numeric or
+graded scores for `llm_judge` (pass/fail only), and overall scores
+(per-evaluator pass rates are in the metrics API).
+
+### Security
+
+An `llm_judge` evaluator's prompt embeds the test case's input, the
+response being judged, and the expected output (when present) — all
+untrusted, dataset-or-model-sourced content. Each is wrapped in a
+delimited block the judge's system prompt names as data to evaluate,
+never an instruction, and any literal occurrence of the delimiter syntax
+inside that content is neutralized first, so hostile text can never forge
+a block boundary. This is a mitigation, not a guarantee: whether the judge
+model actually honors "treat this as data" is a model-following property
+this system cannot enforce, the same limitation every provider adapter
+already has with dataset content and model output. The judge's own
+free-text explanation, if any, is read only to extract the verdict token
+and is never stored, so it cannot leak hostile content back into stored
+data either way.

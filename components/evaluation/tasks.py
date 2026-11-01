@@ -2,27 +2,37 @@
 
 Like the experiment task it carries only ``result_id``; the stored
 configuration decides what runs. Enqueueing only means submitted.
+``EvaluationService`` manages its own short sessions via ``scope`` (see its
+own docstring) so a judge call, when configured, is never made with a
+transaction open; this task must not wrap the call in a session itself.
 """
 
 import uuid
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import Any
 
+from components.core.config import get_settings
 from components.core.database import session_scope
 from components.evaluation.dependencies import build_evaluation_service
+from components.evaluation.service import EvaluationService
+from components.third_party.llm.service import LLMService
 from taskiq_app import broker, ensure_broker_started
 
 EVALUATE_RESULT_TASK = "evaluation.evaluate_result"
 
 
+@lru_cache
+def get_evaluation_service() -> EvaluationService:
+    """One service per process, mirroring experiments' ``get_runner()``."""
+    return build_evaluation_service(
+        scope=session_scope, llm_service=LLMService(get_settings())
+    )
+
+
 @broker.task(task_name=EVALUATE_RESULT_TASK)
 async def evaluate_result(result_id: str) -> None:
-    # The entry point owns the session: one read, pure evaluation and one
-    # insert in a single transaction, committed by the scope.
-    async with session_scope() as session:
-        await build_evaluation_service(session).evaluate_result(
-            uuid.UUID(result_id)
-        )
+    await get_evaluation_service().evaluate_result(uuid.UUID(result_id))
 
 
 async def enqueue_results(

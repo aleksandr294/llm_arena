@@ -256,6 +256,7 @@ async def test_get_input_joins_case_and_experiment_config(
         assert first.expected_output is None
         assert second.expected_output == "out2"
         assert second.response_text == "r2"
+        assert second.case_input == "i2"
         assert second.experiment_id == experiment.id
         assert second.status == "succeeded"
         assert second.evaluator_config == config

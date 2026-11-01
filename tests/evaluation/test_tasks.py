@@ -15,6 +15,7 @@ from taskiq import InMemoryBroker
 
 from components.core.database import session_scope
 from components.evaluation.models import EvaluationResult
+from components.evaluation.service import EvaluationService
 from components.experiments.dependencies import build_experiment_service
 from components.experiments.enums import ExperimentStatus
 from components.experiments.models import Experiment
@@ -141,3 +142,90 @@ async def test_started_experiment_ends_with_stored_evaluations(
 async def _answer(prompt: str) -> Any:
     # prompt is "Q: in<p>"; the case's expected output is "out<p>".
     return response("out" + prompt.removeprefix("Q: in"))
+
+
+async def test_llm_judge_evaluator_runs_end_to_end(
+    tasks: tuple[ModuleType, ModuleType],
+    session_factory: Factory,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The HTTP-triggered path never calls evaluate_result (confirmed in
+    api/v1/endpoints/evaluations.py); only the task does, enqueued the same
+    way as for a deterministic-only configuration. This drives the real
+    create -> start -> generate -> evaluate pipeline with an llm_judge
+    evaluator configured, through the same taskiq task this change
+    rewrote."""
+    experiments, evaluation = tasks
+    memory = InMemoryBroker()
+    evaluate: Any = memory.register_task(
+        evaluation.evaluate_result.original_func,
+        task_name=evaluation.EVALUATE_RESULT_TASK,
+    )
+    execute: Any = memory.register_task(
+        experiments.execute_result.original_func,
+        task_name=experiments.EXECUTE_RESULT_TASK,
+    )
+
+    async def on_succeeded(result_id: uuid.UUID) -> None:
+        await evaluation.enqueue_results([result_id], task=evaluate)
+
+    target_llm = FakeLLM()
+    target_llm.handler = lambda prompt: _answer(prompt)
+    runner = ExperimentRunner(
+        scope_of(session_factory),
+        target_llm.as_service(),
+        2,
+        on_succeeded=on_succeeded,
+    )
+    monkeypatch.setattr(experiments, "get_runner", lambda: runner)
+
+    judge_llm = FakeLLM([response(text="PASS, the answer matches.")])
+    judge_service = EvaluationService(
+        scope=scope_of(session_factory), llm_service=judge_llm.as_service()
+    )
+    monkeypatch.setattr(
+        evaluation, "get_evaluation_service", lambda: judge_service
+    )
+    await memory.startup()
+
+    async def enqueue(ids: Any) -> None:
+        await experiments.enqueue_results(ids, task=execute)
+
+    owner = await seed_principal(session_factory)
+    dataset_id = await make_dataset(session_factory, 1, owner)
+    data = create_data(dataset_id)
+    data.evaluator_config = data.evaluator_config.model_validate(
+        {
+            "evaluators": [
+                {
+                    "id": "judge",
+                    "type": "llm_judge",
+                    "criteria": "must match the expected output",
+                    "provider": "openai",
+                    "model": "judge-model",
+                }
+            ]
+        }
+    )
+    async with session_factory() as s:
+        service = build_experiment_service(s, target_llm.as_service(), enqueue)
+        experiment = await service.create(owner, data)
+        await s.commit()
+        experiment_id = experiment.id
+    async with session_factory() as s:
+        started = await build_experiment_service(
+            s, target_llm.as_service(), enqueue
+        ).start(ROOT, experiment_id)
+    assert started == 1
+    await memory.wait_all()  # generation
+    await memory.wait_all()  # evaluation enqueued by the hook
+    await memory.shutdown()
+
+    async with session_factory() as s:
+        rows = (await s.scalars(select(EvaluationResult))).all()
+    assert [(r.evaluator_id, r.evaluator_type, r.status) for r in rows] == [
+        ("judge", "llm_judge", "passed")
+    ]
+    # The judge's own target, independent of the experiment's target model.
+    target, _, _ = judge_llm.calls[0]
+    assert target.model == "judge-model"

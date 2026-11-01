@@ -393,6 +393,37 @@ async def test_valid_evaluator_config_is_stored_and_returned(
     assert got["evaluator_config"] == response.json()["evaluator_config"]
 
 
+async def test_llm_judge_evaluator_config_is_stored_and_returned(
+    client: AsyncClient, session_factory: Factory, owner: Principal
+) -> None:
+    dataset_id = await make_dataset(session_factory, 1, owner)
+    config = {
+        "evaluators": [
+            {
+                "id": "judge",
+                "type": "llm_judge",
+                "criteria": "response must be polite and on-topic",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+            }
+        ]
+    }
+    response = await client.post(
+        URL, json=payload(dataset_id, evaluator_config=config)
+    )
+    assert response.status_code == 201
+    stored = response.json()["evaluator_config"]["evaluators"]
+    assert stored == [
+        {
+            "id": "judge",
+            "type": "llm_judge",
+            "criteria": "response must be polite and on-topic",
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     "evaluator_config",
     [
@@ -404,6 +435,22 @@ async def test_valid_evaluator_config_is_stored_and_returned(
             ]
         },
         ["not", "an", "object"],
+        {
+            "evaluators": [
+                {"id": "j", "type": "llm_judge", "provider": "openai"}
+            ]
+        },
+        {
+            "evaluators": [
+                {
+                    "id": "j",
+                    "type": "llm_judge",
+                    "criteria": "ok",
+                    "provider": "mistral",
+                    "model": "m",
+                }
+            ]
+        },
     ],
 )
 async def test_invalid_evaluator_config_is_422(
