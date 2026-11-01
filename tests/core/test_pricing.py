@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from components.metrics.exceptions import PricingConfigError
-from components.metrics.pricing import (
+from components.core.exceptions import PricingConfigError
+from components.core.pricing import (
     RateSchema,
     estimate_cost,
     find_rate,

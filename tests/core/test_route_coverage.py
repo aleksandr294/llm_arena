@@ -24,6 +24,9 @@ PUBLIC: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/auth/refresh"),
         ("POST", "/api/v1/auth/logout"),
         ("POST", "/api/v1/auth/validate"),
+        # Prometheus scrape endpoint; unauthenticated like /health, and
+        # carries no sensitive data (see openspec/specs/observability).
+        ("GET", "/metrics"),
     }
 )
 # Framework routes (not APIRoute instances) that serve documentation.

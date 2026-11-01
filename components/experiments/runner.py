@@ -22,7 +22,14 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from components.core.config import DEFAULT_MAX_STORED_RESPONSE_CHARS
 from components.core.database import SessionScope
+from components.core.exceptions import PricingConfigError
+from components.core.pricing import estimate_cost, find_rate, load_pricing
 from components.experiments.enums import ResultStatus
+from components.experiments.model_metrics import (
+    record_cost,
+    record_generation_speed,
+    record_latency,
+)
 from components.experiments.models import Experiment
 from components.experiments.repository import (
     LEASE_SECONDS,
@@ -116,12 +123,14 @@ class ExperimentRunner:
         jitter: Callable[[], float] = _default_jitter,
         on_succeeded: OnSucceeded | None = None,
         max_response_chars: int = DEFAULT_MAX_STORED_RESPONSE_CHARS,
+        pricing_file: str | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least 1")
         if max_response_chars < 1:
             raise ValueError("max_response_chars must be at least 1")
         self._max_response_chars = max_response_chars
+        self._pricing_file = pricing_file
         self._scope = scope
         self._llm = llm_service
         self._max_concurrency = max_concurrency
@@ -199,6 +208,7 @@ class ExperimentRunner:
                         max_tokens=config.max_tokens,
                         timeout_seconds=config.timeout_seconds,
                     )
+                self._record_model_metrics(work.target, response)
                 return self._success(response, attempts)
             except LLMProviderError as exc:
                 if exc.retryable and made < config.max_attempts:
@@ -234,6 +244,48 @@ class ExperimentRunner:
                     f"Unexpected error: {type(exc).__name__}",
                     attempts,
                 )
+
+    def _record_model_metrics(
+        self, target: ModelTargetSchema, response: LLMResponseSchema
+    ) -> None:
+        """Best-effort: a metrics problem must never affect generation."""
+        provider = target.provider.value
+        model = target.model
+        try:
+            record_latency(provider, model, response.latency_ms)
+            record_generation_speed(
+                provider,
+                model,
+                response.usage.output_tokens,
+                response.latency_ms,
+            )
+            self._record_cost(provider, model, response)
+        except Exception:
+            logger.warning("model call metrics recording failed")
+
+    def _record_cost(
+        self, provider: str, model: str, response: LLMResponseSchema
+    ) -> None:
+        try:
+            pricing = load_pricing(self._pricing_file)
+        except PricingConfigError as exc:
+            # The path is operator configuration, never request content.
+            logger.warning(
+                "Pricing file %r is unusable: %s; cost metric unavailable",
+                exc.path,
+                exc.reason,
+            )
+            return
+        if pricing is None:
+            return
+        rate = find_rate(pricing, provider, model)
+        if rate is None:
+            return
+        cost = estimate_cost(
+            rate, response.usage.input_tokens, response.usage.output_tokens
+        )
+        if cost is not None:
+            record_cost(provider, model, pricing.currency, cost)
 
     def _success(self, response: LLMResponseSchema, attempts: int) -> _Outcome:
         usage = response.usage

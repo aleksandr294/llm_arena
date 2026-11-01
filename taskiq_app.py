@@ -12,10 +12,14 @@ was submitted: completion must be observed through persisted state.
 
 import asyncio
 
-from taskiq import AsyncBroker
+from prometheus_client import start_http_server
+from taskiq import AsyncBroker, TaskiqEvents, TaskiqState
 from taskiq_aio_pika import AioPikaBroker
 
 from components.core.config import get_settings
+from components.core.logging import configure_logging
+from components.core.task_metrics import TaskMetricsMiddleware
+from components.core.worker_metrics import WORKER_METRICS_REGISTRY
 
 WORKER_TASKS_PATTERN = "components/*/tasks.py"
 
@@ -25,6 +29,31 @@ def build_broker(url: str) -> AsyncBroker:
 
 
 broker = build_broker(get_settings().rabbitmq_url.get_secret_value())
+# The middleware's hooks only run inside the worker's receiver loop, so
+# registering it here is a no-op for the API process, which only kicks
+# tasks through this same broker instance.
+broker.add_middlewares(TaskMetricsMiddleware())
+
+
+@broker.on_event(TaskiqEvents.WORKER_STARTUP)
+async def _configure_worker_logging(_state: TaskiqState) -> None:
+    # Runs only in the worker process, not when the API imports ``broker``.
+    configure_logging(get_settings().log_level)
+
+
+@broker.on_event(TaskiqEvents.WORKER_STARTUP)
+async def _start_worker_metrics_server(_state: TaskiqState) -> None:
+    settings = get_settings()
+    # Binds every interface *inside the container*, the same lesson
+    # api/app.py documents for API_HOST: a loopback-only bind is
+    # unreachable from another container (Prometheus) or from the host
+    # through a published port. The host-side exposure is already
+    # restricted to 127.0.0.1 by the Compose "ports:" mapping.
+    start_http_server(
+        settings.worker_metrics_port,
+        addr="0.0.0.0",  # nosec B104 - container-internal; see comment above
+        registry=WORKER_METRICS_REGISTRY,
+    )
 
 
 _broker_lock = asyncio.Lock()

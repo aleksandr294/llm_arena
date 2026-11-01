@@ -388,3 +388,4 @@ Reference pages (moved out of this file; content unchanged):
 - [Quality checks and real-provider tests](docs/testing.md)
 - [Development agents](docs/development-agents.md)
 - [Security checks and findings register](docs/security.md)
+- [Observability: logs, metrics, Grafana](docs/observability.md)

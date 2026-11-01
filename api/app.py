@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from admin import mount_admin
+from api.metrics import MetricsMiddleware, metrics_endpoint
 from api.middleware import SecurityMiddleware
 from api.v1.router import api_v1_router
 from components.core.config import SettingsSchema, get_settings
@@ -106,5 +107,14 @@ def create_app(settings: SettingsSchema | None = None) -> FastAPI:
         SecurityMiddleware,
         max_body_bytes=settings.max_request_body_bytes,
         hsts_max_age_seconds=settings.hsts_max_age_seconds,
+    )
+    # Outermost: counts every response, including one SecurityMiddleware
+    # answers itself (413, generic 500), before any header decoration.
+    app.add_middleware(MetricsMiddleware)
+    app.add_api_route(
+        "/metrics",
+        metrics_endpoint,
+        methods=["GET"],
+        include_in_schema=False,
     )
     return app
