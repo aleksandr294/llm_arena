@@ -4,6 +4,7 @@
 
 ```bash
 pytest                    # integration tests need a test DATABASE_URL (below)
+pytest -n auto            # parallel groups, one schema each (below)
 pytest -m "not integration"
 ruff check .
 black --check .
@@ -31,6 +32,31 @@ DATABASE_URL=postgresql+asyncpg://<user>:<password>@localhost:5432/llm_arena_tes
 The rule lives in `tests/helpers.py` (`checked_database_url`) and is used by
 the root `conftest.py` and every test that builds an engine from
 `DATABASE_URL`; a new test that does so must use it too.
+
+## Parallel run
+
+`pytest -n 4` (or `-n auto`) runs the tests in parallel with pytest-xdist.
+Each worker is a test group with its own PostgreSQL schema in the test
+database (`test_gw0`, `test_gw1`, ...), so groups never see or drop each
+other's tables. A session fixture in the root `conftest.py` recreates the
+schema when the worker starts and drops it when the worker ends. Every
+connection to the test database, including engines a test builds itself and
+the child processes of the admin panel tests, resolves table names in that
+schema only (`public` is not on the path), and its `application_name` is the
+schema name, so queries on `pg_stat_activity` can tell workers apart.
+
+- Plain `pytest` (no `-n`) uses the default schema and needs no setup.
+- The database-name guard above still applies; no schema is created on a
+  database whose name lacks `test`. Under `-n` with such a `DATABASE_URL`
+  every test errors at setup, unit tests included.
+- After a killed run a leftover `test_gw*` schema is replaced on the next
+  start. To remove them by hand:
+  `DROP SCHEMA test_gw0 CASCADE;` in the test database.
+- A test that starts a child process must pass on the schema: use
+  `tests.admin.panel_process.child_environment()` and call
+  `route_to_worker_schema()` in the child (see `tests/admin/uvicorn_child.py`).
+- A test that queries `pg_stat_activity` must filter on
+  `application_name = current_setting('application_name')`.
 
 ## Real-provider tests
 
