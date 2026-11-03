@@ -174,13 +174,12 @@ async def test_staff_and_admins_cannot_change_organizations(
     assert panel.get("c", "/list/Organization").json()["results"] == []
 
 
-async def test_organizations_cannot_be_added_deleted_or_exported(
+async def test_organizations_cannot_be_deleted_or_exported(
     panel: Panel, world: World, emails: dict[str, str]
 ) -> None:
     org = world.org_ids["a"]
     panel.sign_in("root", emails["superadmin"], PASSWORD)
     calls: list[tuple[str, str, Any]] = [
-        ("POST", f"{API}/add/Organization", {"name": "new"}),
         ("DELETE", f"{API}/delete/Organization/{org}", None),
         ("POST", f"{API}/export/Organization", {"format": "CSV"}),
         ("POST", f"{API}/action/Organization/x", {"ids": []}),
@@ -189,7 +188,8 @@ async def test_organizations_cannot_be_added_deleted_or_exported(
         assert panel.request("root", method, path, json_body=body).status == 403
     config = panel.get("root", "/configuration").json()["models"]
     organization = next(m for m in config if m["name"] == "Organization")
-    assert organization["permissions"] == ["Change"]
+    # Creation is the one addition (see test_panel_management).
+    assert organization["permissions"] == ["Add", "Change"]
 
 
 async def test_panel_session_ends_when_the_organization_is_blocked(

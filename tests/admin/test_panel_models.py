@@ -261,6 +261,24 @@ def test_password_hash_is_in_no_response(
         assert panel.get("c", "/list/User", **params).status == 422
 
 
+def _expected(actor: str, model: str, method: str, path: str) -> int:
+    """403 everywhere except what the management operations open for admins
+    and superadmins (covered by ``test_panel_management``): the answer is
+    then their own validation result, never a silent success."""
+    if actor == "staff_a" or model not in ("User", "Experiment"):
+        return 403
+    if model == "Experiment" and method == "DELETE":
+        return 409  # exp_a is pending: refused, not removed
+    if model == "User":
+        if method == "POST" and "/add/" in path:
+            return 422  # nothing valid in the payload
+        if method == "PATCH":
+            return 200  # only is_active is read; absent means no change
+        if "/action/" in path:
+            return 422  # delete_selected is not a registered action
+    return 403
+
+
 @pytest.mark.parametrize("actor", ["staff_a", "admin_a", "superadmin"])
 async def test_models_are_read_only_on_the_server(
     panel: Panel,
@@ -290,7 +308,11 @@ async def test_models_are_read_only_on_the_server(
         ]
         for method, path, body in calls:
             reply = panel.request("c", method, path, json_body=body)
-            assert reply.status == 403, (model, method, path)
+            assert reply.status == _expected(actor, model, method, path), (
+                model,
+                method,
+                path,
+            )
 
     # Nothing changed, and the user can still sign in with the same password.
     async with engine.connect() as conn:
