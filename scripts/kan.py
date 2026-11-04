@@ -70,7 +70,7 @@ class KanClient:
     def _request(
         self, method: str, path: str, body: dict[str, Any] | None = None
     ) -> Any:
-        request = urllib.request.Request(
+        request = urllib.request.Request(  # noqa: S310 - scheme validated to http(s) in __init__
             self.url + path,
             data=json.dumps(body).encode() if body is not None else None,
             method=method,
@@ -79,7 +79,7 @@ class KanClient:
                 "Content-Type": "application/json",
             },
         )
-        with urllib.request.urlopen(  # nosec B310 - scheme validated to http(s) in __init__
+        with urllib.request.urlopen(  # noqa: S310 - scheme validated to http(s) in __init__
             request
         ) as response:
             return json.load(response)

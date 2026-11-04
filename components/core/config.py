@@ -5,7 +5,9 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Placeholder shipped in .env.example; must never be accepted as a real key.
-JWT_SECRET_PLACEHOLDER: Final = "change-me-generate-a-random-secret-key"
+JWT_SECRET_PLACEHOLDER: Final = (
+    "change-me-generate-a-random-secret-key"  # noqa: S105 - rejected placeholder, not a real secret
+)
 JWT_SECRET_MIN_LENGTH: Final = 32
 ADMIN_SECRET_MIN_LENGTH: Final = 32
 DEFAULT_MAX_STORED_RESPONSE_CHARS: Final = 1_000_000

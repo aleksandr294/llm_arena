@@ -12,15 +12,18 @@ repos:
         entry: poetry run ruff check --fix
         language: system
         types: [python]
+        # Explicit file arguments bypass ruff's extend-exclude, so keep the
+        # generated-style migrations out of the autofix here too.
+        exclude: ^migrations/versions/
       - id: mypy
         name: mypy
         entry: poetry run mypy
         language: system
         types: [python]
         pass_filenames: false
-      - id: bandit
-        name: bandit
-        entry: poetry run bandit -c pyproject.toml -ll -q -r
+      - id: ruff-security
+        name: ruff security rules (S) on production code
+        entry: poetry run ruff check --select S
         language: system
         types: [python]
-        exclude: ^tests/
+        exclude: ^(tests/|conftest\.py$)
