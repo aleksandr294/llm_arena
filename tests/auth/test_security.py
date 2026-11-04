@@ -187,7 +187,7 @@ def test_algorithm_none_is_rejected() -> None:
             "jti": "x",
             "typ": "access",
         },
-        None,
+        "",  # the "none" algorithm takes no key
         algorithm="none",
     )
 
