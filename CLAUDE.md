@@ -256,8 +256,8 @@ Use a proportionate workflow for documentation-only changes and refactoring that
 - Validate imported datasets and external provider responses.
 - Protect access to experiment data and stored credentials.
 - Treat imported test cases and model outputs as untrusted data.
-- Quality gates: Bandit at medium severity and above must be clean (command in `docs/security.md`); `poetry run pip-audit` must be clean or every finding explained (record it as not run, never as passed, when offline).
-- A `# nosec` needs a reason in the same comment (enforced by `tests/security/test_nosec_reasons.py`).
+- Quality gates: Ruff security rules (`S`) must be clean on production code (command in `docs/security.md`); `poetry run pip-audit` must be clean or every finding explained (record it as not run, never as passed, when offline).
+- A `# noqa: S...` security suppression needs a reason in the same comment (`# noqa: S311 - reason`) (enforced by `tests/security/test_nosec_reasons.py`).
 - Update the findings register in `docs/security.md` whenever a scan or review produces a finding.
 
 ## Completion Report

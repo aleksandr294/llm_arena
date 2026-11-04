@@ -8,8 +8,8 @@ pytest -m "not integration"
 ruff check .
 black --check .
 mypy
-poetry run bandit -c pyproject.toml -r -ll components api admin cli.py \
-  main.py taskiq_app.py migrations scripts   # medium and above must be clean
+poetry run ruff check --select S components api admin cli.py main.py \
+  taskiq_app.py migrations migrations/versions/*.py scripts   # security rules, must be clean
 poetry run pip-audit      # needs network; see docs/security.md
 pre-commit run --all-files
 ```

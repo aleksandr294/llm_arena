@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  POETRY_VERSION: "2.5.1"
+  PIP_AUDIT_VERSION: "2.10.1"
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: arena
+          POSTGRES_PASSWORD: ci-throwaway-postgres
+          POSTGRES_DB: arena_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U arena -d arena_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      rabbitmq:
+        image: rabbitmq:3.13
+        env:
+          RABBITMQ_DEFAULT_USER: arena
+          RABBITMQ_DEFAULT_PASS: ci-throwaway-rabbitmq
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Throwaway values for the service containers above; the database name
+      # contains "test", as tests/helpers.py requires.
+      DATABASE_URL: postgresql+asyncpg://arena:ci-throwaway-postgres@localhost:5432/arena_test
+      RABBITMQ_URL: amqp://arena:ci-throwaway-rabbitmq@localhost:5672/
+      JWT_SECRET_KEY: ci-only-jwt-signing-key-0123456789abcdefghij
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Poetry
+        run: python -m pip install "poetry==${POETRY_VERSION}"
+      - name: Cache virtualenv
+        uses: actions/cache@v4.2.3
+        with:
+          path: .venv
+          key: venv-dev-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
+      - name: Install dependencies
+        run: poetry install --no-root
+      - name: Ruff lint
+        run: poetry run ruff check .
+      - name: Black check
+        run: poetry run black --check .
+      - name: mypy
+        run: poetry run mypy
+      - name: pytest
+        run: poetry run pytest -q
+
+  ruff-security:
+    name: ruff-security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Poetry
+        run: python -m pip install "poetry==${POETRY_VERSION}"
+      - name: Cache virtualenv
+        uses: actions/cache@v4.2.3
+        with:
+          path: .venv
+          key: venv-dev-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
+      - name: Install dependencies
+        run: poetry install --no-root
+      - name: Ruff security rules (S) on production code
+        run: >-
+          poetry run ruff check --select S
+          components api admin cli.py main.py taskiq_app.py
+          migrations migrations/versions/*.py scripts
+
+  pip-audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Poetry
+        run: python -m pip install "poetry==${POETRY_VERSION}"
+      - name: Install runtime dependencies only
+        # No venv cache in this job: the informational step below adds
+        # development packages to the same environment.
+        run: poetry install --only main --no-root
+      - name: Install pip-audit in a separate environment
+        run: |
+          python -m venv "$RUNNER_TEMP/audit-tool"
+          "$RUNNER_TEMP/audit-tool/bin/python" -m pip install \
+            "pip-audit==${PIP_AUDIT_VERSION}"
+      - name: Upgrade pip in the audited environment
+        # pip is seeded into the virtualenv, is not a locked dependency and
+        # would otherwise report advisories that are fixed by upgrading it.
+        run: .venv/bin/python -m pip install --upgrade pip
+      - name: Audit runtime dependencies (blocking)
+        # Add `--ignore-vuln <id>` here only with a findings-register entry
+        # in docs/security.md, see docs/ci.md. An unreachable vulnerability
+        # database makes pip-audit exit non-zero, so the job fails.
+        run: |
+          SITE_PACKAGES="$(.venv/bin/python -c \
+            'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+          "$RUNNER_TEMP/audit-tool/bin/pip-audit" --path "$SITE_PACKAGES"
+      - name: Install development dependencies
+        continue-on-error: true
+        run: poetry install --no-root
+      - name: Audit the full environment (informational)
+        continue-on-error: true
+        run: |
+          SITE_PACKAGES="$(.venv/bin/python -c \
+            'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+          "$RUNNER_TEMP/audit-tool/bin/pip-audit" --path "$SITE_PACKAGES"
+
+  zap:
+    name: zap
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - name: Run the ZAP scans against a throwaway instance
+        # ZAP alerts do not fail the job (-I); a failed setup does.
+        run: scripts/ci_zap.sh "$RUNNER_TEMP/zap-reports"
+      - name: Upload ZAP reports
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: zap-reports
+          path: ${{ runner.temp }}/zap-reports
+          if-no-files-found: warn

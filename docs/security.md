@@ -13,30 +13,34 @@ is in [accepted risks](#accepted-risks), and what is still open is in
 
 | Check | How to run | Notes |
 | ----- | ---------- | ----- |
-| Bandit | see below | Medium severity and above must be clean; also a pre-commit hook |
+| Ruff security rules (`S`) | see below | No findings in production code; also a pre-commit hook |
 | pip-audit | `poetry run pip-audit` | Needs network access |
 | Hostile-corpus tests | `poetry run pytest -q tests/security` | No database needed for most; see the last section |
 | Doc pointer test | `poetry run pytest -q tests/security/test_security_doc_pointers.py` | Fails when a path or test cited in the OWASP tables no longer exists |
-| Suppression reasons | `poetry run pytest -q tests/security/test_nosec_reasons.py` | Fails on a production `# nosec` without a reason |
+| Suppression reasons | `poetry run pytest -q tests/security/test_nosec_reasons.py` | Fails on a production `# noqa: S...` without a reason |
 | Container smoke test | [Container hardening](#container-hardening) | Throwaway network, database and port |
 | ZAP baseline and API scan | [How to run the ZAP scans](#how-to-run-the-zap-scans) | Throwaway instance only |
 
 Export the settings first (`set -a; . ./.env; set +a`) for the tests, as in
 the README.
 
-### Static analysis (Bandit)
+### Static analysis (Ruff security rules)
 
-Configuration is `[tool.bandit]` in `pyproject.toml` (production code only,
-medium severity and above):
+The `S` rules (Ruff's port of Bandit's checks) are enabled in
+`[tool.ruff.lint]` in `pyproject.toml`. Tests (`tests/**`) and the root
+`conftest.py` are exempt through per-file ignores. Ruff has no severity
+threshold, so production code must have no findings at all:
 
 ```bash
-poetry run bandit -c pyproject.toml -r -ll components api admin cli.py \
-  main.py taskiq_app.py migrations scripts
+poetry run ruff check --select S components api admin cli.py main.py \
+  taskiq_app.py migrations migrations/versions/*.py scripts
 ```
 
-It also runs as the `bandit` pre-commit hook. A suppression must be an inline
-comment with a reason, `# nosec B311 - reason`; the test
-`tests/security/test_nosec_reasons.py` fails otherwise.
+The same rules also run in a plain `poetry run ruff check .` and as the
+`ruff-security` pre-commit hook (production code only). A suppression must be
+an inline comment with a reason, `# noqa: S311 - reason`; the test
+`tests/security/test_nosec_reasons.py` fails otherwise, and Ruff's `RUF100`
+reports a suppression that no longer suppresses anything.
 
 ### Dependency audit (pip-audit)
 
@@ -58,6 +62,12 @@ other production dependency. None reach the production image: the
 Dockerfile installs with `poetry install --only main --no-root`, which
 never installs the `dev` group. No package was upgraded; see the findings
 register.
+
+In CI the `pip-audit` job of the pull-request workflow ([CI](ci.md)) audits
+the runtime dependencies only (`poetry install --only main --no-root`, then
+`pip-audit --path` on that environment) and blocks the merge on any finding;
+an audit of the full environment runs as well but is informational. There is
+no scheduled run.
 
 ## HTTP hardening
 
@@ -270,12 +280,12 @@ register.
 | ---- | ------ | ------------------- | -------- |
 | A01 Broken Access Control | covered | Every route except health, login, refresh, logout and validate needs a bearer token. The principal is loaded from the database on each request, and every query is scoped by owner or organization. Out-of-scope resources answer 404 exactly like missing ones. | `components/core/access.py`, `api/v1/utils.py`, `docs/access-control.md`, `tests/core/test_route_coverage.py::test_every_route_requires_a_token_unless_public`, `tests/core/test_isolation.py::test_other_staff_and_other_organization_see_404_like_unknown`, `tests/core/test_access.py::test_staff_scoped_to_owner` |
 | A02 Cryptographic Failures | partially covered | Passwords use Argon2id; JWTs are HS256 with a required secret of at least 32 characters that rejects the `.env.example` placeholder; secrets are `SecretStr` and masked. The app does not terminate TLS (use a reverse proxy), HSTS is opt-in, database and broker connections are not forced to TLS, and data is not encrypted at rest. | `components/auth/security.py`, `components/core/config.py`, `tests/auth/test_security.py::test_hash_is_argon2id_salted_and_hides_password`, `tests/test_config.py::test_jwt_secret_too_short_is_rejected_without_echo`, `tests/core/test_middleware.py::test_hsts_only_when_enabled` |
-| A03 Injection | covered | All queries go through SQLAlchemy with bound parameters; the only interpolated SQL is a migration over a constant table list (Bandit B608, justified). Dataset text is inserted into prompts literally, never evaluated. CSV exports neutralize formula prefixes. Model output is stored and never executed. Prompt injection into the model itself is inherent to the product and is contained by treating all output as data. | `migrations/versions/20261018_1200_0006_resource_ownership.py`, `components/experiments/utils.py`, `components/metrics/export.py`, `tests/security/test_prompt_rendering.py::test_hostile_input_is_inserted_unchanged`, `tests/security/test_export_encoding.py::test_every_formula_prefix_is_neutralized`, `tests/security/test_pipeline.py::test_runner_stores_hostile_output_verbatim`, `tests/admin/test_panel_hardening.py::test_malformed_filters_are_controlled_and_not_logged` |
+| A03 Injection | covered | All queries go through SQLAlchemy with bound parameters; the only interpolated SQL is a migration over a constant table list (Ruff S608, justified). Dataset text is inserted into prompts literally, never evaluated. CSV exports neutralize formula prefixes. Model output is stored and never executed. Prompt injection into the model itself is inherent to the product and is contained by treating all output as data. | `migrations/versions/20261018_1200_0006_resource_ownership.py`, `components/experiments/utils.py`, `components/metrics/export.py`, `tests/security/test_prompt_rendering.py::test_hostile_input_is_inserted_unchanged`, `tests/security/test_export_encoding.py::test_every_formula_prefix_is_neutralized`, `tests/security/test_pipeline.py::test_runner_stores_hostile_output_verbatim`, `tests/admin/test_panel_hardening.py::test_malformed_filters_are_controlled_and_not_logged` |
 | A04 Insecure Design | partially covered | Tenant isolation, bounded request sizes, bounded concurrency, idempotent task execution and stored-response limits are designed in. There are no per-tenant quotas or spend caps, and no request rate limiting. | `components/experiments/schemas.py`, `components/experiments/runner.py`, `tests/experiments/test_runner.py::test_concurrency_limit_is_never_exceeded`, `tests/experiments/test_runner.py::test_duplicate_delivery_makes_one_request`, `tests/experiments/test_response_bounds.py::test_over_limit_text_is_cut_to_the_limit_with_a_visible_marker` |
 | A05 Security Misconfiguration | partially covered | Security headers and a request body limit wrap the whole app, the default bind is loopback, the container runs as a non-root user with `no-new-privileges`, and the admin panel is off without its secret. Swagger UI and ReDoc are on by default (switch: `API_DOCS_ENABLED`), HSTS is off by default, and base images are tagged, not pinned by digest. | `api/middleware.py`, `Dockerfile`, `docker-compose.yml`, `tests/core/test_middleware.py::test_headers_on_success_and_error_responses`, `tests/test_config.py::test_api_host_defaults_to_loopback`, `tests/core/test_openapi.py::test_docs_can_be_turned_off`, `tests/admin/test_mount.py::test_app_without_secret_answers_404_for_admin` |
-| A06 Vulnerable and Outdated Components | partially covered | Dependencies are locked and `poetry run pip-audit` reported no known vulnerabilities on 2026-10-18; Bandit runs as a pre-commit hook. The audit is a manual command (no CI or scheduled run), and `pip install poetry` in the Dockerfile and the base image are not pinned. | `poetry.lock`, `pyproject.toml`, `.pre-commit-config.yaml`, `tests/security/test_nosec_reasons.py` |
+| A06 Vulnerable and Outdated Components | partially covered | Dependencies are locked and `poetry run pip-audit` reported no known vulnerabilities on 2026-10-18; the Ruff security rules (`S`) run as a pre-commit hook. The audit runs on every pull request in CI (runtime dependencies, blocking; see [CI](ci.md)) and can be run by hand, but there is no scheduled run, and `pip install poetry` in the Dockerfile and the base image are not pinned. | `poetry.lock`, `pyproject.toml`, `.pre-commit-config.yaml`, `tests/security/test_nosec_reasons.py` |
 | A07 Identification and Authentication Failures | partially covered | Argon2id with rehash, 12 to 128 character password policy, uniform login failures with a dummy verification for unknown users, short-lived access tokens, rotating refresh tokens with reuse detection, and session revocation on deactivation or password change. There is no login throttling or lockout, and no MFA. | `components/auth/service.py`, `docs/authentication.md`, `tests/auth/test_api.py::test_login_failures_have_identical_body`, `tests/auth/test_service.py::test_login_failures_are_uniform`, `tests/auth/test_service.py::test_refresh_reuse_revokes_family`, `tests/auth/test_users_api.py::test_password_change_ends_sessions_and_swaps_password` |
-| A08 Software and Data Integrity Failures | partially covered | No unsafe deserialization (pickle, yaml load, eval, exec are absent, and Bandit would flag them), JWT algorithm pinned so `alg: none` and algorithm confusion fail, locked dependencies with hashes, schema changes only through Alembic. There is no CI pipeline, image signing or SBOM. | `components/auth/security.py`, `poetry.lock`, `tests/auth/test_security.py::test_algorithm_none_is_rejected`, `tests/auth/test_security.py::test_other_hmac_algorithm_is_rejected` |
+| A08 Software and Data Integrity Failures | partially covered | No unsafe deserialization (pickle, yaml load, eval, exec are absent, and Ruff's `S` rules would flag them), JWT algorithm pinned so `alg: none` and algorithm confusion fail, locked dependencies with hashes, schema changes only through Alembic. A pull-request CI workflow exists ([CI](ci.md)), but there is no release or deploy pipeline, image signing or SBOM. | `components/auth/security.py`, `poetry.lock`, `tests/auth/test_security.py::test_algorithm_none_is_rejected`, `tests/auth/test_security.py::test_other_hmac_algorithm_is_rejected` |
 | A09 Security Logging and Monitoring Failures | gap | Logs carry ids and statuses and tests assert that secrets and hostile content never reach them. Failed logins, refresh-token reuse, permission denials and admin or user-management actions are not logged, there is no audit trail, and no alerting or central log pipeline. | `components/auth/service.py`, `admin/__init__.py`, `tests/auth/test_logging.py::test_auth_flows_do_not_log_secrets`, `tests/core/test_isolation.py::test_nothing_sensitive_reaches_debug_logs`, `tests/security/test_pipeline.py::test_no_log_record_contains_hostile_text` |
 | A10 Server-Side Request Forgery | not applicable | The API never fetches a user-supplied URL. Provider endpoints are the SDK defaults, with only the API key configurable; there are no URL fields in the schemas or settings. SDKs read their own environment variables, which only the operator controls. The Kan helper script validates its URL scheme. | `components/third_party/llm/providers/openai.py`, `components/third_party/llm/providers/anthropic.py`, `components/core/config.py`, `tests/security/test_kan_client.py::test_non_http_scheme_is_rejected` |
 
@@ -302,6 +312,7 @@ applicable.
 
 | Source | Severity | Location | Outcome |
 | ------ | -------- | -------- | ------- |
+| Ruff S (replaces Bandit) | n/a | production code (`poetry run ruff check --select S components api admin cli.py main.py taskiq_app.py migrations migrations/versions/*.py scripts`, 2026-11-04) | Tool change: Bandit was replaced by Ruff's `S` rules and the `# nosec Bxxx` suppressions became `# noqa: Sxxx - reason` (same ids). The re-scan is clean. Ruff also flagged three strings Bandit had not: `token_type = "bearer"` (`components/auth/schemas.py`) and `JWT_SECRET_PLACEHOLDER` (`components/core/config.py`), both justified with `# noqa: S105 - reason`, and the `urllib.request.Request` in `scripts/kan.py` (S310, same justification as `urlopen`). The Bandit rows below are historical findings and keep their original ids |
 | Bandit B104 | Medium | `components/core/config.py` (`api_host`) | Fixed: default is `127.0.0.1`; the Compose `api` service sets `API_HOST=0.0.0.0`; documented in `.env.example` and README; `tests/test_config.py::test_api_host_defaults_to_loopback` |
 | Bandit B608 | Medium | `migrations/versions/20261018_1200_0006_resource_ownership.py` | Justified: the interpolated names come from the module-level `TABLES` constant, never user input (`# nosec B608` with reason) |
 | Bandit B310 | Medium | `scripts/kan.py` (`urlopen`) | Fixed and justified: `KanClient.__init__` rejects non-http(s) URLs (`tests/security/test_kan_client.py`), then `# nosec B310` with reason |
@@ -317,9 +328,9 @@ applicable.
 | OWASP A09 | Medium | `components/auth/service.py`, `admin/__init__.py` | Follow-up card: failed logins, token reuse, permission denials and admin actions are not logged and there is no audit trail |
 | OWASP A04, API4, API6 | Medium | `components/experiments/service.py` | Follow-up card: no per-tenant quota or spend cap on experiments |
 | OWASP A02, API8 | Low | deployment | Accepted: TLS termination is out of scope for the app; terminate TLS at a reverse proxy and set `HSTS_MAX_AGE_SECONDS` there |
-| OWASP A05, A06 | Low | `Dockerfile` | Follow-up card: pin the base image by digest and the Poetry version; run `pip-audit` on a schedule or in CI |
+| OWASP A05, A06 | Low | `Dockerfile` | Follow-up card: pin the base image by digest and the Poetry version; `pip-audit` now runs in the pull-request workflow ([CI](ci.md)), a scheduled run is still open |
 | OWASP A05, API8 | Low | `api/app.py` | Accepted: Swagger UI and ReDoc are on by default for developers; `API_DOCS_ENABLED=false` turns them off (`tests/core/test_openapi.py::test_docs_can_be_turned_off`) |
-| OWASP A08 | Low | build and release | Accepted: no CI, image signing or SBOM in this project |
+| OWASP A08 | Low | build and release | Accepted: no image signing or SBOM in this project (pull requests are checked by the [CI workflow](ci.md); there is no release or deploy pipeline) |
 | OWASP A07 | Low | authentication | Accepted: no MFA; passwords and bearer tokens only |
 | OWASP A05, A01 | Low | `docker-compose.yml` (`promtail` service) | Accepted: Promtail mounts `/var/run/docker.sock` read-only to discover container logs (`docker_sd_configs`); `:ro` only blocks writes to the socket file, not which Docker API calls can be made over it, so this is effectively root-equivalent host access. Dev-only, localhost-bound stack. Follow-up: a read-only Docker API proxy sidecar before any non-local use |
 | ZAP 10038 | Medium | `GET /docs` (Swagger UI), `GET /admin/` (panel) | Fixed (verified by re-scan 2026-10-19; the panel now only raises 10055, next row): `Content-Security-Policy` on every response, page policies with hashed inline scripts for `/docs`, `/redoc` and `/admin` (`tests/core/test_middleware.py::test_documentation_pages_policy_covers_their_sources`, `tests/core/test_middleware.py::test_admin_panel_policy_covers_its_sources`, `tests/core/test_middleware.py::test_non_html_responses_get_the_strict_policy`) |
@@ -385,7 +396,7 @@ that documented commands and environment names exist, and a single
 | Swagger UI and ReDoc loaded from a CDN without SRI (ZAP 90003) | Docs can be disabled; CSP limits the page to the CDN origin; version pinned to the `@5` major | maintainers | before an internet-facing deployment |
 | Admin panel CSP keeps `style-src 'unsafe-inline'` (ZAP 10055) | The panel UI sets inline styles that cannot be hashed; scripts stay limited to `'self'` and one hashed inline script | maintainers | before an internet-facing deployment |
 | Server logs may contain request-derived text (the 500 path logs the traceback; pydantic and SQL exception messages can embed input) | Responses carry no detail; logs must be access-controlled and treated as sensitive | maintainers | before an internet-facing deployment |
-| No MFA, no image signing, no CI or SBOM | Out of scope for this project stage | maintainers | next major release |
+| No MFA, no image signing, no release pipeline or SBOM | Out of scope for this project stage | maintainers | next major release |
 
 ## Known gaps and follow-ups
 
@@ -401,7 +412,8 @@ Open work is tracked on the Kan board as tech-debt cards, one per theme:
   other settings (provider keys, `PRICING_FILE`, `ADMIN_SECRET_KEY`,
   `LLM_MAX_CONCURRENCY`) to the containers, and the base images and the Poetry version are
   not pinned by digest.
-- Running `pip-audit` on a schedule or in CI, pinning the docs CDN assets with
+- Running `pip-audit` on a schedule (it already runs for pull requests, see
+  [CI](ci.md)), pinning the docs CDN assets with
   SRI or serving them locally, and replacing or patching the panel UI to drop
   `style-src 'unsafe-inline'`.
 - Not verified: the CSP in a real browser, and any deployment behind a
