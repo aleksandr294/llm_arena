@@ -11,7 +11,7 @@ version tag, and a new push to the same pull request cancels the older run.
 
 | Job (status check name) | What it runs | Blocks the merge |
 | ----------------------- | ------------ | ---------------- |
-| `tests` | PostgreSQL 17 and RabbitMQ 3.13 service containers, then `ruff check .`, `black --check .`, `mypy` and `pytest -q` (database `arena_test`) | Yes |
+| `tests` | PostgreSQL 17 and RabbitMQ 3.13 service containers, then `ruff check .`, `black --check .`, `mypy` and `pytest -q -n auto` (parallel groups, one schema each, database `arena_test`) | Yes |
 | `ruff-security` | Ruff's Bandit rule family (`S`) over the production code | Yes |
 | `pip-audit` | `pip-audit` over the locked runtime dependencies, plus an informational audit of the full environment | Yes (runtime step only) |
 | `zap` | The three OWASP ZAP scans of [Security](security.md) against a throwaway instance; reports uploaded as the `zap-reports` artifact | No, reports only |
@@ -31,7 +31,7 @@ pointing at a scratch database whose name contains `test` (see
 poetry run ruff check .
 poetry run black --check .
 poetry run mypy
-poetry run pytest -q
+poetry run pytest -q -n auto
 
 # ruff-security
 poetry run ruff check --select S components api admin cli.py main.py \

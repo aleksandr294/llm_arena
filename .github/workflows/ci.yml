@@ -75,7 +75,7 @@ jobs:
       - name: mypy
         run: poetry run mypy
       - name: pytest
-        run: poetry run pytest -q
+        run: poetry run pytest -q -n auto
 
   ruff-security:
     name: ruff-security
