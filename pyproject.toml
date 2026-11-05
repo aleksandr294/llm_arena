@@ -33,6 +33,7 @@ black = "*"
 mypy = "*"
 pre-commit = "*"
 pip-audit = "^2.10.1"
+pytest-xdist = "^3.8.0"
 
 [build-system]
 requires = ["poetry-core"]
