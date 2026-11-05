@@ -10,9 +10,10 @@ scoped model matches no rows.
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from fastadmin import AdminApiException, SqlAlchemyModelAdmin
+from fastadmin.models.schemas import ModelFieldWidgetSchema, WidgetType
 from sqlalchemy import ColumnElement, event, false, select, true
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -40,6 +41,13 @@ def principal_of(user: Any) -> Principal | None:
     if isinstance(user, SessionUser):
         return user.principal
     return None
+
+
+FORBIDDEN_DETAIL = "You do not have permission to perform this action."
+
+
+def forbidden() -> AdminApiException:
+    return AdminApiException(403, detail=FORBIDDEN_DETAIL)
 
 
 class ScopedSession(Session):
@@ -198,6 +206,79 @@ class ReadOnlyScopedAdmin(SqlAlchemyModelAdmin):  # type: ignore[misc]
 
     list_per_page = 25
 
+    # Read-only values computed for the detail view only: key -> widget
+    # showing it. fastadmin builds forms and detail pages from model columns,
+    # so each key is registered as a synthetic, read-only form field (see
+    # ``get_model_fields_with_widget_types``); it is never writable and never
+    # part of a list payload. Keys must not collide with a column or method.
+    computed_fields: ClassVar[dict[str, WidgetType]] = {}
+    # Form-only keys that are not queryable columns (e.g. a password input).
+    form_only_fields: ClassVar[frozenset[str]] = frozenset()
+
+    async def computed_values(
+        self, session: AsyncSession, obj: Any
+    ) -> dict[str, Any]:
+        """Values for ``computed_fields`` of one row. ``session`` is scoped
+        to the signed-in user, so a related row the user may not see yields
+        no value (``None``/``0``). Never return secrets or hashes."""
+        return {}
+
+    def get_model_fields_with_widget_types(
+        self, with_m2m: bool | None = None
+    ) -> list[ModelFieldWidgetSchema]:
+        fields: list[ModelFieldWidgetSchema] = (
+            super().get_model_fields_with_widget_types(with_m2m=with_m2m)
+        )
+        if with_m2m:  # only many-to-many fields were asked for
+            return fields
+        return [
+            *fields,
+            *(
+                ModelFieldWidgetSchema(
+                    name=key,
+                    column_name=key,
+                    is_m2m=False,
+                    is_pk=False,
+                    is_immutable=False,
+                    form_widget_type=widget,
+                    form_widget_props={
+                        "required": False,
+                        "disabled": True,
+                        "readOnly": True,
+                    },
+                    filter_widget_type=WidgetType.Input,
+                    filter_widget_props={"required": False},
+                )
+                for key, widget in self.computed_fields.items()
+            ),
+        ]
+
+    def get_fields_for_serialize(self) -> set[str]:
+        # Added after ``exclude`` on purpose: computed keys are not columns.
+        names: set[str] = super().get_fields_for_serialize()
+        return names | set(self.computed_fields)
+
+    def get_writable_field_names(self) -> set[str]:
+        names: set[str] = super().get_writable_field_names()
+        return names - set(self.computed_fields)
+
+    async def serialize_obj_attributes(
+        self,
+        obj: Any,
+        attributes_to_serizalize: list[ModelFieldWidgetSchema],
+        list_view: bool = False,
+    ) -> dict[str, Any]:
+        # Computed keys are not attributes of the row.
+        columns = [
+            f
+            for f in attributes_to_serizalize
+            if f.name not in self.computed_fields
+        ]
+        data: dict[str, Any] = await super().serialize_obj_attributes(
+            obj, columns, list_view=list_view
+        )
+        return data
+
     async def serialize_obj(
         self, obj: Any, list_view: bool = False
     ) -> dict[str, Any]:
@@ -212,6 +293,11 @@ class ReadOnlyScopedAdmin(SqlAlchemyModelAdmin):  # type: ignore[misc]
         # address; show the model name and a short id instead.
         pk = self.get_model_pk_name(self.model_cls)
         data["__str__"] = f"{self.model_cls.__name__} {str(data.get(pk))[:8]}"
+        if not list_view and self.computed_fields:
+            async with self.get_sessionmaker()() as session:
+                values = await self.computed_values(session, obj)
+            for key in self.computed_fields:
+                data[key] = values.get(key)
         if not list_view or not self.list_display:
             return data
         keep = {*self.list_display, pk, "__str__"}
@@ -227,7 +313,14 @@ class ReadOnlyScopedAdmin(SqlAlchemyModelAdmin):  # type: ignore[misc]
     ) -> tuple[list[Any], int]:
         """Reject filter values the column cannot hold with a 422 before
         they reach the database (a driver error would echo the value into
-        the log and answer 500)."""
+        the log and answer 500). Computed and form-only keys are registered
+        as form fields but are not columns: refuse them as filter or sort
+        keys (422)."""
+        not_queryable = {*self.computed_fields, *self.form_only_fields}
+        keys = {field for field, _ in (filters or {})}
+        keys.add((sort_by or "").lstrip("-"))
+        if keys & not_queryable:
+            raise AdminApiException(422, detail="Invalid filter or sort key.")
         checked: dict[Any, Any] = {}
         for (field, condition), value in (filters or {}).items():
             column = getattr(self.model_cls, field, None)
@@ -262,6 +355,14 @@ class ReadOnlyScopedAdmin(SqlAlchemyModelAdmin):  # type: ignore[misc]
         except ValueError:
             return None
         return await super().orm_get_obj(key)
+
+    def caller(self) -> Principal:
+        """The signed-in principal, or 403: write paths never run without
+        one, whatever the permission hooks said."""
+        principal = principal_of(self.user)
+        if principal is None:
+            raise forbidden()
+        return principal
 
     def get_sessionmaker(self) -> async_sessionmaker[AsyncSession]:
         return scoped_sessionmaker(get_engine(), principal_of(self.user))

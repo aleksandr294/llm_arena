@@ -5,13 +5,14 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.core.enums import Role
 from components.core.exceptions import OrganizationRequiredError
 from components.datasets.exceptions import DatasetNotFoundError
-from components.datasets.models import TestCase
+from components.datasets.models import Dataset, TestCase
+from components.evaluation.models import EvaluationResult
 from components.experiments.dependencies import build_experiment_service
 from components.experiments.enums import ExperimentStatus, ResultStatus
 from components.experiments.exceptions import (
@@ -544,3 +545,123 @@ async def test_oversized_rendered_prompt_is_rejected_and_nothing_stored(
     async with session_factory() as s:
         assert (await s.scalars(select(Experiment))).all() == []
         assert (await s.scalars(select(ExperimentResult))).all() == []
+
+
+async def _seed_evaluation(factory: Factory, experiment_id: uuid.UUID) -> None:
+    async with factory() as s:
+        result_id = await s.scalar(
+            select(ExperimentResult.id)
+            .where(ExperimentResult.experiment_id == experiment_id)
+            .limit(1)
+        )
+        assert result_id is not None
+        s.add(
+            EvaluationResult(
+                experiment_result_id=result_id,
+                experiment_id=experiment_id,
+                evaluator_id="exact",
+                evaluator_type="exact_match",
+                evaluator_version=1,
+                status="passed",
+                details={},
+            )
+        )
+        await s.commit()
+
+
+async def _count(factory: Factory, model: Any, experiment_id: uuid.UUID) -> int:
+    async with factory() as s:
+        return (
+            await s.scalar(
+                select(func.count())
+                .select_from(model)
+                .where(model.experiment_id == experiment_id)
+            )
+            or 0
+        )
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+async def test_delete_terminal_removes_experiment_and_children(
+    session_factory: Factory, status: str
+) -> None:
+    owner = await seed_principal(session_factory)
+    experiment_id = await make_experiment(session_factory, owner=owner)
+    await _seed_evaluation(session_factory, experiment_id)
+    async with session_factory() as s:
+        experiment = await s.get(Experiment, experiment_id)
+        assert experiment is not None
+        dataset_id = experiment.dataset_id
+        experiment.status = status
+        await s.commit()
+    assert await _count(session_factory, ExperimentResult, experiment_id) == 3
+    assert await _count(session_factory, EvaluationResult, experiment_id) == 1
+    async with session_factory() as s:
+        await _service(s).delete(owner, experiment_id)
+        await s.commit()
+    async with session_factory() as s:
+        assert await s.get(Experiment, experiment_id) is None
+        assert await s.get(Dataset, dataset_id) is not None
+        cases = await s.scalar(
+            select(func.count())
+            .select_from(TestCase)
+            .where(TestCase.dataset_id == dataset_id)
+        )
+        assert cases == 3
+    assert await _count(session_factory, ExperimentResult, experiment_id) == 0
+    assert await _count(session_factory, EvaluationResult, experiment_id) == 0
+
+
+@pytest.mark.parametrize("start", [False, True])
+async def test_delete_active_conflicts_and_keeps_data(
+    session_factory: Factory, start: bool
+) -> None:
+    experiment_id = await make_experiment(session_factory, start=start)
+    async with session_factory() as s:
+        with pytest.raises(InvalidTransitionError) as raised:
+            await _service(s).delete(ROOT, experiment_id)
+        assert raised.value.action == "delete"
+        assert raised.value.status == ("running" if start else "pending")
+    async with session_factory() as s:
+        assert await s.get(Experiment, experiment_id) is not None
+    assert await _count(session_factory, ExperimentResult, experiment_id) == 3
+
+
+async def test_delete_out_of_scope_is_not_found(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await make_experiment(session_factory)
+    async with session_factory() as s:
+        experiment = await s.get(Experiment, experiment_id)
+        assert experiment is not None
+        experiment.status = "completed"
+        await s.commit()
+    stranger = await seed_principal(session_factory)
+    other_admin = await seed_principal(session_factory, Role.ADMIN)
+    for caller in (stranger, other_admin):
+        async with session_factory() as s:
+            with pytest.raises(ExperimentNotFoundError):
+                await _service(s).delete(caller, experiment_id)
+    async with session_factory() as s:
+        assert await s.get(Experiment, experiment_id) is not None
+
+
+async def test_delete_by_staff_owner_admin_and_superadmin(
+    session_factory: Factory,
+) -> None:
+    owner = await seed_principal(session_factory)
+    admin = await seed_principal(
+        session_factory, Role.ADMIN, owner.organization_id
+    )
+    for caller in (owner, admin, ROOT):
+        experiment_id = await make_experiment(session_factory, owner=owner)
+        async with session_factory() as s:
+            experiment = await s.get(Experiment, experiment_id)
+            assert experiment is not None
+            experiment.status = "failed"
+            await s.commit()
+        async with session_factory() as s:
+            await _service(s).delete(caller, experiment_id)
+            await s.commit()
+        async with session_factory() as s:
+            assert await s.get(Experiment, experiment_id) is None
