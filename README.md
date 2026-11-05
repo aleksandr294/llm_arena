@@ -346,8 +346,12 @@ The workflow is defined in `CLAUDE.md`; this is the short version.
   `main` (for example `feat/<change-name>`); never work on `main` or reuse an
   earlier feature's branch.
 - **Commits:** [Conventional Commits](https://www.conventionalcommits.org/)
-  (the `git-conventional-commits` skill). Commits stay local; nothing is
-  pushed, merged or opened as a pull request unless the owner asks.
+  (the `git-conventional-commits` skill). When a flow finishes, the main
+  session commits, pushes the feature branch and opens a pull request against
+  `main` through the GitHub MCP server, provided the branch is not `main`,
+  the tree is clean, the checks passed and valid review findings are
+  addressed. Merging, force-pushing, pushing `main` and bypassing checks need
+  the owner's explicit authorization.
 - **Task board:** tasks live on a local Kan board (`scripts/kan.py`).
   Columns are `Open`, `In-progress`, `Review` and `Done`: move a card to
   `In-progress` when work starts, to `Review` after the independent review
@@ -356,7 +360,7 @@ The workflow is defined in `CLAUDE.md`; this is the short version.
 - **Subagents:** `coder` implements one task, `tester` adds tests and runs
   the checks, `reviewer` reviews the diff read-only (see
   [Development agents](docs/development-agents.md)). The main session
-  commits.
+  commits, pushes and opens the pull request; subagents never do.
 - **Review:** an independent review happens before a pull request, and valid
   findings are addressed.
 - **Testing policy:** unit tests for domain logic and evaluators, integration
