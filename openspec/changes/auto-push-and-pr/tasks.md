@@ -2,7 +2,7 @@
 
 ## 1. Workflow rules and docs
 
-- [x] 1.0 Commit `.mcp.json` (GitHub MCP, token from `GITHUB_PERSONAL_ACCESS_TOKEN`) and verify `python3 -m json.tool .mcp.json` passes and the file contains no token value.
+- [x] 1.0 Commit `.mcp.json` (GitHub MCP, token via `scripts/github-mcp-headers.sh` from the environment or `.env`) and verify `python3 -m json.tool .mcp.json` passes and the file contains no token value.
 
 - [x] 1.1 Update `CLAUDE.md` Development Workflow (steps 9-10, the "Do not push..." line) and Completion Report so push + PR are part of a finished flow with the preconditions, while merge, force-push, pushing `main` and bypassing checks still need explicit authorization. Verify: `grep -n -i "push" CLAUDE.md` shows no line that contradicts the new rule.
 - [x] 1.2 Update the `git-conventional-commits` skill: description and Rules say commit first, then push the feature branch and open the PR per the flow (never force, never `main`, never `--no-verify`); add a "Publishing" section with the precondition list, `git push -u origin <branch>` and opening the PR only through the GitHub MCP `create_pull_request` tool (`base: main`) with title/body rules; state that `gh` is not used. Verify: the skill has no remaining "never pushes" statement and no `gh` instruction.
@@ -17,5 +17,5 @@
 
 ## Workflow follow-up
 
-- Set `GITHUB_PERSONAL_ACCESS_TOKEN`, disable the `github` plugin and restart Claude Code before the first auto-publish.
+- Set `GITHUB_PERSONAL_ACCESS_TOKEN` in the environment or `.env`, disable the `github` plugin and restart Claude Code before the first auto-publish.
 - Archive the change after review requirements are satisfied, then verify `openspec/specs/dev-agent-workflow/spec.md`.

@@ -26,8 +26,10 @@ currently forbid it.
   forbidden without explicit authorization.
 - Subagents (`coder`, `tester`, `reviewer`) stay unable to push or open PRs;
   only the main session does.
-- Declare the GitHub MCP server in the project's `.mcp.json` (token read
-  from `GITHUB_PERSONAL_ACCESS_TOKEN`, never stored in the file).
+- Declare the GitHub MCP server in the project's `.mcp.json` (a
+  `headersHelper` script reads `GITHUB_PERSONAL_ACCESS_TOKEN` from the
+  environment or the git-ignored `.env`; the token is never stored in a
+  tracked file).
 - Update `CLAUDE.md`, `README.md`, `docs/development-agents.md`, the
   `git-conventional-commits` skill and the `kan-review` skill to match.
 
@@ -49,7 +51,7 @@ currently forbid it.
   the delta at archive).
 - No application code, API, migration or dependency changes.
 - Prerequisite on the developer machine: `GITHUB_PERSONAL_ACCESS_TOKEN` set
-  in the environment (fine-grained token with Contents, Pull requests:
+  in the environment or in `.env` (fine-grained token with Contents, Pull requests:
   read/write) and the `github` MCP server connected. The `github` plugin
   must be disabled so the server is not declared twice.
 - Outward-facing effect: pushed branches and open PRs on

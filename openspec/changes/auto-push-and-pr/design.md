@@ -33,8 +33,10 @@ no token is set, `gh` is not installed, and the repo has no `.github/`. The remo
    commands.
 
 2. **GitHub MCP is the only channel for the PR.** The server is declared in
-   `.mcp.json` (HTTP, `Authorization: Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}`),
-   so the token stays in the environment and out of the repo. The PR is
+   `.mcp.json` (HTTP) with `headersHelper: scripts/github-mcp-headers.sh`, which prints
+   the `Authorization` header from `GITHUB_PERSONAL_ACCESS_TOKEN` (environment,
+   else the git-ignored `.env`, reading only that key), so the token stays out
+   of the repo and needs no shell export. The PR is
    created with the MCP `create_pull_request` tool. Alternatives: the `gh`
    CLI and GitHub REST with curl, both rejected by the owner's decision (one
    channel, no token handling in shell commands). The MCP server cannot push
