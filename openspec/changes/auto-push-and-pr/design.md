@@ -62,8 +62,7 @@ no token is set, `gh` is not installed, and the repo has no `.github/`. The remo
 6. **PR content.** MCP `create_pull_request` with `base: main`, `head: <branch>`, title in
    Conventional Commits form (same as the main commit), body from the
    Completion Report in `CLAUDE.md`, ending with the session's attribution
-   line. The body is passed from a file or heredoc, and must not contain
-   secrets or raw sensitive request content.
+   line. The body must not contain secrets or raw sensitive request content.
 
 7. **Authorization is durable and scoped.** The owner's request for this
    change is the explicit authorization that `CLAUDE.md` demands; the text in

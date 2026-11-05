@@ -17,6 +17,5 @@
 
 ## Workflow follow-up
 
-- Branch note: `CLAUDE.md` requires a new branch from up-to-date `main` before artifacts are written; the current branch is `feat/admin-panel-management`. Create `feat/auto-push-and-pr` from `main` at apply time, moving these artifacts there.
 - Set `GITHUB_PERSONAL_ACCESS_TOKEN`, disable the `github` plugin and restart Claude Code before the first auto-publish.
 - Archive the change after review requirements are satisfied, then verify `openspec/specs/dev-agent-workflow/spec.md`.
