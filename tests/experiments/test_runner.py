@@ -642,6 +642,8 @@ async def test_no_session_or_transaction_is_open_during_the_model_call(
                     "select count(*) from pg_stat_activity "
                     "where datname = current_database() "
                     "and pid <> pg_backend_pid() "
+                    "and application_name = "
+                    "current_setting('application_name') "
                     "and state like 'idle in transaction%'"
                 )
             )

@@ -33,6 +33,51 @@ def _jwt_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JWT_SECRET_KEY", TEST_JWT_SECRET)
 
 
+@pytest.fixture(scope="session", autouse=True)
+async def _worker_schema() -> AsyncIterator[str | None]:
+    """The schema of this pytest-xdist worker in the test database.
+
+    Each worker is a test group with its own schema, so groups never see or
+    drop each other's tables. A serial run, or a run without
+    ``DATABASE_URL`` (unit tests only), uses no schema. A leftover schema of
+    an aborted run is replaced.
+    """
+    from tests.helpers import (
+        SchemaRouting,
+        checked_database_url,
+        database_of,
+        worker_schema,
+    )
+
+    schema = worker_schema()
+    if schema is None or "DATABASE_URL" not in os.environ:
+        yield None
+        return
+    url = checked_database_url()  # the guard: only a test database
+    from sqlalchemy import text
+
+    from components.core.database import create_engine
+
+    # Opened before the routing below is installed (and not pooled with it),
+    # so the DDL names the schema itself.
+    admin = create_engine(url)
+    drop = text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')  # name validated
+    try:
+        async with admin.begin() as conn:
+            await conn.execute(drop)
+            await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+        routing = SchemaRouting(schema, database_of(url))
+        routing.install()
+        try:
+            yield schema
+        finally:
+            routing.remove()
+            async with admin.begin() as conn:
+                await conn.execute(drop)
+    finally:
+        await admin.dispose()
+
+
 @pytest.fixture
 def app() -> FastAPI:
     from api.app import create_app
