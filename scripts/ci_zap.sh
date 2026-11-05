@@ -62,7 +62,7 @@ docker run -d --name "$PG" --network "$NET" \
 docker run -d --name "$MQ" --network "$NET" \
   -e RABBITMQ_DEFAULT_USER="$MQ_USER" \
   -e RABBITMQ_DEFAULT_PASS="$MQ_PASSWORD" \
-  rabbitmq:3.13-management >/dev/null
+  rabbitmq:3.13 >/dev/null
 
 ENVS=(
   -e "JWT_SECRET_KEY=$JWT_SECRET"
@@ -89,8 +89,14 @@ wait_for() { # <description> <attempts> <command...>
 pg_ready() { docker exec "$PG" pg_isready -h 127.0.0.1 -U "$PG_USER" -d "$PG_DB"; }
 mq_ready() { docker exec "$MQ" rabbitmq-diagnostics -q ping; }
 
-wait_for "PostgreSQL" 45 pg_ready
-wait_for "RabbitMQ" 60 mq_ready
+if ! wait_for "PostgreSQL" 45 pg_ready; then
+  docker logs --tail 40 "$PG" >&2 || true
+  exit 1
+fi
+if ! wait_for "RabbitMQ" 90 mq_ready; then
+  docker logs --tail 40 "$MQ" >&2 || true
+  exit 1
+fi
 
 docker run --rm --network "$NET" "${ENVS[@]}" "$IMAGE" \
   alembic upgrade head >/dev/null
