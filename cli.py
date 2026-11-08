@@ -1,4 +1,5 @@
-"""Operator commands: ``python cli.py create-superadmin --email <email>``.
+"""Operator commands: ``python cli.py create-superadmin --email <email>`` and
+``python cli.py purge-refresh-tokens``.
 
 The password is read from a hidden prompt or ``SUPERADMIN_PASSWORD``, never
 from an argument, and is never printed.
@@ -6,6 +7,7 @@ from an argument, and is never printed.
 
 import asyncio
 import os
+from datetime import timedelta
 from typing import Annotated
 
 import typer
@@ -52,6 +54,32 @@ def create_superadmin(
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from None
     typer.echo(user_id)
+
+
+async def _purge(retention: timedelta) -> tuple[int, int]:
+    async with session_scope() as session:
+        service = build_auth_service(session, get_settings())
+        return await service.purge(retention)
+
+
+@app.command("purge-refresh-tokens")
+def purge_refresh_tokens(
+    retention_days: Annotated[
+        int,
+        typer.Option(
+            min=0,
+            help="Keep tokens that expired less than this many days ago.",
+        ),
+    ] = 7,
+) -> None:
+    """Delete long-expired refresh tokens and stale sign-in throttle rows.
+
+    Run it periodically (cron, a scheduled job): nothing else removes them.
+    """
+    tokens, throttles = asyncio.run(_purge(timedelta(days=retention_days)))
+    typer.echo(
+        f"Deleted {tokens} refresh token(s) and {throttles} throttle row(s)"
+    )
 
 
 if __name__ == "__main__":

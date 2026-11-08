@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Per-organization active experiment limit
-The system SHALL reject starting an experiment with 429 when the caller's organization already has the configured maximum number of experiments that are pending or running, and SHALL NOT count finished experiments.
+The system SHALL reject starting an experiment with 429 when the caller's organization already has the configured maximum number of running experiments, and SHALL NOT count experiments that were created but not started or that have finished.
 
 #### Scenario: Limit reached
 - **WHEN** an organization with the maximum number of running experiments starts another

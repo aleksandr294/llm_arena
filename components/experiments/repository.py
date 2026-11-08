@@ -8,7 +8,7 @@ from sqlalchemy import func, select, update
 from components.core.access import scope_clause
 from components.core.repository import BaseRepository
 from components.core.schemas import Principal
-from components.experiments.enums import ResultStatus
+from components.experiments.enums import ExperimentStatus, ResultStatus
 from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.utils import derive_final_status
 
@@ -100,6 +100,18 @@ class ExperimentRepository(BaseRepository[Experiment]):
             .with_for_update()
             .execution_options(populate_existing=True)
         )
+
+    async def count_running(self, organization_id: uuid.UUID) -> int:
+        """Experiments of an organization that are running now."""
+        count = await self.session.scalar(
+            select(func.count())
+            .select_from(Experiment)
+            .where(
+                Experiment.organization_id == organization_id,
+                Experiment.status == ExperimentStatus.RUNNING.value,
+            )
+        )
+        return count or 0
 
     async def get_for_update_unscoped(
         self, experiment_id: uuid.UUID

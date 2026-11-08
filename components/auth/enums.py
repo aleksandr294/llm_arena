@@ -10,3 +10,9 @@ class RejectionReason(StrEnum):
     EXPIRED = "expired"
     INVALID = "invalid"
     REVOKED = "revoked"
+
+
+class ThrottleScope(StrEnum):
+    ACCOUNT = "account"
+    ADDRESS = "address"
+    ADMIN = "admin"

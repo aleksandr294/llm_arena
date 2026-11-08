@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.auth.models import RefreshToken
+from components.auth.models import AuthThrottle, RefreshToken
 from components.auth.security import hash_password
 from components.core.enums import Role
 from components.organizations.models import Organization
@@ -14,7 +14,7 @@ from components.organizations.repository import OrganizationRepository
 from components.users.models import User
 from components.users.repository import UserRepository
 
-MODELS = (Organization, User, RefreshToken)
+MODELS = (Organization, User, RefreshToken, AuthThrottle)
 PASSWORD = "correct horse battery"
 
 Factory = async_sessionmaker[AsyncSession]

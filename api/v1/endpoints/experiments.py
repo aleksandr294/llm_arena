@@ -9,8 +9,9 @@ from api.v1.utils import (
     SessionDep,
     get_created_range,
     get_principal,
+    get_settings_dependency,
 )
-from components.core.config import get_settings
+from components.core.config import SettingsSchema, get_settings
 from components.core.exceptions import OrganizationRequiredError
 from components.core.schemas import Principal
 from components.datasets.exceptions import DatasetNotFoundError
@@ -18,6 +19,7 @@ from components.experiments.dependencies import build_experiment_service
 from components.experiments.enums import ExperimentStatus, ResultStatus
 from components.experiments.exceptions import (
     ExperimentNotFoundError,
+    ExperimentQuotaError,
     ExperimentValidationError,
     InvalidTransitionError,
 )
@@ -53,8 +55,14 @@ def get_experiment_service(
     session: SessionDep,
     llm: Annotated[LLMService, Depends(get_llm_service)],
     enqueue: Annotated[EnqueueResults, Depends(get_enqueue)],
+    settings: Annotated[SettingsSchema, Depends(get_settings_dependency)],
 ) -> ExperimentService:
-    return build_experiment_service(session, llm, enqueue)
+    return build_experiment_service(
+        session,
+        llm,
+        enqueue,
+        settings.max_active_experiments_per_organization,
+    )
 
 
 ServiceDep = Annotated[ExperimentService, Depends(get_experiment_service)]
@@ -67,6 +75,10 @@ def _not_found() -> HTTPException:
 
 def _conflict(exc: InvalidTransitionError) -> HTTPException:
     return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+
+
+def _quota(exc: ExperimentQuotaError) -> HTTPException:
+    return HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc))
 
 
 @router.post(
@@ -206,7 +218,7 @@ async def _enqueue_response(
     response_model=ExperimentEnqueueSchema,
     summary="Start an experiment",
     description="Enqueue its cases. 202 means submitted, not executed.",
-    responses=errors(401, 404, 409),
+    responses=errors(401, 404, 409, 429),
 )
 async def start_experiment(
     experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
@@ -217,6 +229,8 @@ async def start_experiment(
         raise _not_found() from None
     except InvalidTransitionError as exc:
         raise _conflict(exc) from None
+    except ExperimentQuotaError as exc:
+        raise _quota(exc) from None
     return await _enqueue_response(service, principal, experiment_id, enqueued)
 
 
@@ -244,7 +258,7 @@ async def cancel_experiment(
     response_model=ExperimentEnqueueSchema,
     summary="Retry failed cases",
     description="Enqueue only the failed cases; successful ones are not rerun.",
-    responses=errors(401, 404, 409),
+    responses=errors(401, 404, 409, 429),
 )
 async def retry_failed(
     experiment_id: uuid.UUID, service: ServiceDep, principal: PrincipalDep
@@ -255,4 +269,6 @@ async def retry_failed(
         raise _not_found() from None
     except InvalidTransitionError as exc:
         raise _conflict(exc) from None
+    except ExperimentQuotaError as exc:
+        raise _quota(exc) from None
     return await _enqueue_response(service, principal, experiment_id, enqueued)

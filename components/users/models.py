@@ -47,6 +47,11 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=true()
     )
+    # Access tokens issued before this instant are rejected (logout,
+    # password change, deactivation). NULL: never revoked.
+    tokens_valid_after: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

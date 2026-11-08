@@ -47,3 +47,41 @@ def configure_logging(level: str = "INFO") -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JSONFormatter())
     root.handlers = [handler]
+
+
+_SECURITY_LOGGER: Final = logging.getLogger("security")
+# The only values a security event may carry: ids and fixed vocabulary, never
+# an email, token, password or request body.
+_SECURITY_FIELDS: Final = frozenset(
+    {"user_id", "client_address", "outcome", "reason"}
+)
+_SECURITY_VALUE_MAX: Final = 128
+
+
+def _escaped(value: object) -> str:
+    """Printable ASCII only: control characters, newlines and non-ASCII
+    become escapes, so a hostile value cannot forge or split a log line."""
+    return ascii(str(value))[1:-1][:_SECURITY_VALUE_MAX]
+
+
+def log_security_event(name: str, **fields: object) -> None:
+    """Log one structured security event (``auth.login_failed``, ...).
+
+    Only allowlisted fields are accepted (a ``TypeError`` names an unknown
+    one, so a call site cannot start logging a secret by accident); ``None``
+    values are left out and the rest are escaped.
+    """
+    unknown = fields.keys() - _SECURITY_FIELDS
+    if unknown:
+        raise TypeError(f"not allowed in a security event: {sorted(unknown)}")
+    extra = {
+        key: _escaped(value)
+        for key, value in fields.items()
+        if value is not None
+    }
+    level = (
+        logging.INFO
+        if fields.get("outcome") == "success"
+        else (logging.WARNING)
+    )
+    _SECURITY_LOGGER.log(level, name, extra={"event": name, **extra})

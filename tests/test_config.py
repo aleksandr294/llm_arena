@@ -293,3 +293,38 @@ def test_admin_cookie_and_docs_flags_parse(monkeypatch: MonkeyPatch) -> None:
 
     assert settings.admin_session_cookie_secure is False
     assert settings.api_docs_enabled is False
+
+
+def test_auth_and_quota_settings_defaults(monkeypatch: MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+
+    settings = SettingsSchema(_env_file=None)
+
+    assert settings.jwt_leeway_seconds == 5
+    assert settings.auth_max_failed_attempts == 5
+    assert settings.auth_max_failed_attempts_per_address == 50
+    assert settings.auth_lockout_seconds == 900
+    assert settings.max_active_experiments_per_organization == 20
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("JWT_LEEWAY_SECONDS", "-1"),
+        ("JWT_LEEWAY_SECONDS", "61"),
+        ("AUTH_MAX_FAILED_ATTEMPTS", "0"),
+        ("AUTH_MAX_FAILED_ATTEMPTS_PER_ADDRESS", "0"),
+        ("AUTH_LOCKOUT_SECONDS", "0"),
+        ("MAX_ACTIVE_EXPERIMENTS_PER_ORGANIZATION", "0"),
+    ],
+)
+def test_auth_and_quota_settings_reject_out_of_range(
+    monkeypatch: MonkeyPatch, name: str, value: str
+) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    assert name.lower() in str(exc.value)

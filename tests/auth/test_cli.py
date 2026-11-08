@@ -6,6 +6,7 @@ import logging
 import sys
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import pytest
@@ -23,10 +24,14 @@ import main
 from api.app import create_app
 from components.auth.dependencies import build_auth_service
 from components.auth.exceptions import InvalidCredentialsError
+from components.auth.models import RefreshToken
+from components.auth.repository import RefreshTokenRepository
 from components.core import database
 from components.core.database import Base
 from components.core.enums import Role
+from components.organizations.repository import OrganizationRepository
 from components.users.models import User
+from components.users.repository import UserRepository
 from tests.auth.helpers import MODELS
 from tests.helpers import checked_database_url, make_settings
 
@@ -251,3 +256,61 @@ def test_no_http_route_creates_users() -> None:
     for path, methods in methods_by_path.items():
         if "POST" in methods:
             assert "user" not in path and "superadmin" not in path, path
+
+
+def _seed_tokens() -> None:
+    async def go() -> None:
+        engine = _engine()
+        async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+            org = await OrganizationRepository(s).create("purge-org")
+            user = await UserRepository(s).create(
+                "purge@example.com", "x", Role.STAFF, org.id
+            )
+            repo = RefreshTokenRepository(s)
+            family = uuid.uuid4()
+            now = datetime.now(UTC)
+            for name, delta in (
+                ("old", timedelta(days=-30)),
+                ("recent", timedelta(days=-2)),
+                ("live", timedelta(days=2)),
+            ):
+                await repo.create(
+                    user.id, family, name.ljust(64, "0"), now + delta
+                )
+            await s.commit()
+        await engine.dispose()
+
+    asyncio.run(go())
+
+
+def _token_hashes() -> list[str]:
+    async def go() -> list[str]:
+        engine = _engine()
+        async with async_sessionmaker(engine)() as s:
+            rows = (await s.scalars(select(RefreshToken.token_hash))).all()
+        await engine.dispose()
+        return sorted(h[:3] for h in rows)
+
+    return asyncio.run(go())
+
+
+def test_purge_refresh_tokens_prints_the_count_and_keeps_live_records() -> None:
+    _seed_tokens()
+
+    result = runner.invoke(cli.app, ["purge-refresh-tokens"])
+
+    assert result.exit_code == 0, _all_output(result)
+    assert "Deleted 1 refresh token(s)" in result.output
+    assert _token_hashes() == ["liv", "rec"]
+
+
+def test_purge_refresh_tokens_honours_retention_days() -> None:
+    _seed_tokens()
+
+    result = runner.invoke(
+        cli.app, ["purge-refresh-tokens", "--retention-days", "1"]
+    )
+
+    assert result.exit_code == 0, _all_output(result)
+    assert "Deleted 2 refresh token(s)" in result.output
+    assert _token_hashes() == ["liv"]

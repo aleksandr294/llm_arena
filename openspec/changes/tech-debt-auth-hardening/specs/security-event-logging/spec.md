@@ -7,7 +7,7 @@ Gives operators a structured trail of security-relevant outcomes (failed logins,
 ## ADDED Requirements
 
 ### Requirement: Security events are logged
-The system SHALL emit one structured log event, with a stable event name, outcome, user id when known, client address and request id, for each failed login, lockout, refresh token reuse, permission denial and admin panel sign-in.
+The system SHALL emit one structured log event, with a stable event name, outcome, user id when known, and the client address and request id when available (the project has no request id yet, and admin panel events carry neither address nor request id), for each failed login, lockout, refresh token reuse, permission denial and admin panel sign-in.
 
 #### Scenario: Failed login
 - **WHEN** a login fails
