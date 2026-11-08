@@ -8,7 +8,6 @@ from alembic import command
 from tests.migrations.helpers import (
     alembic_config,
     run_sql,
-    schema_drift,
     seed_legacy_rows,
 )
 
@@ -32,7 +31,7 @@ def test_upgrade_defaults_existing_rows_to_false_and_downgrades(
         "AND column_name = 'response_truncated'",
     )
     assert column == [("NO", "false")]
-    assert schema_drift(scratch_url) == []
+    # Drift against the models is checked at head in test_round_trip.py.
 
     command.downgrade(alembic_config(), "0006")
     assert run_sql(

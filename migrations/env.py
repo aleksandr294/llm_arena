@@ -27,6 +27,7 @@ def run_migrations_offline() -> None:
         url=_url(),
         target_metadata=target_metadata,
         literal_binds=True,
+        compare_type=True,
         dialect_opts={"paramstyle": "named"},
     )
     with context.begin_transaction():
@@ -34,7 +35,11 @@ def run_migrations_offline() -> None:
 
 
 def _run_sync(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

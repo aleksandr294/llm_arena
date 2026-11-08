@@ -140,6 +140,40 @@ The whole stack in containers (API, worker, PostgreSQL, RabbitMQ):
 docker compose up --build
 ```
 
+Compose reads `.env` for variable substitution only (the localhost
+`DATABASE_URL`/`RABBITMQ_URL` in it are not passed to the containers; Compose
+builds container URLs that point at the `postgres` and `rabbitmq` services).
+Required, guarded with `${VAR:?}` (Compose stops and names the missing one):
+`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `RABBITMQ_DEFAULT_USER`,
+`RABBITMQ_DEFAULT_PASS`, `JWT_SECRET_KEY`. Optional, with the application
+default when unset: `ADMIN_SECRET_KEY`, `ADMIN_SESSION_COOKIE_SECURE`,
+`ADMIN_SESSION_TTL_SECONDS`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`LLM_MAX_CONCURRENCY`, `PRICING_FILE`, `JWT_ACCESS_TTL_SECONDS`,
+`JWT_REFRESH_TTL_SECONDS`, `JWT_ISSUER`, `HEALTH_CHECK_TIMEOUT_SECONDS`,
+`API_DOCS_ENABLED`, `HSTS_MAX_AGE_SECONDS`, `MAX_REQUEST_BODY_BYTES`,
+`MAX_STORED_RESPONSE_CHARS`, `LOG_LEVEL`, `WORKER_METRICS_PORT`,
+`RABBITMQ_ERLANG_COOKIE` (an internal Erlang distribution cookie, not a
+credential; it is stored in the `rabbitmq-data` volume, so leave it fixed).
+Without a `.env`, every command fails (even
+`docker compose up -d postgres rabbitmq`); start from `.env.example`.
+
+`PRICING_FILE` is a path inside the container. Mount your file read-only
+with an override file, for example `docker-compose.override.yml`:
+
+```yaml
+services:
+  worker:
+    volumes:
+      - ./my-pricing.json:/app/pricing.json:ro
+```
+
+and set `PRICING_FILE=/app/pricing.json` in `.env`.
+
+PostgreSQL and RabbitMQ data live in the named volumes `postgres-data` and
+`rabbitmq-data`, so `docker compose down` followed by `up` keeps your
+datasets and results. `docker compose down -v` deletes them. The worker
+container has a healthcheck on its metrics endpoint.
+
 The image runs as the unprivileged user `app` (uid 10001), and Compose
 publishes PostgreSQL (5432) and RabbitMQ (5672, 15672) on `127.0.0.1` only;
 the API is published on 8000. See `docs/security.md`.
@@ -165,7 +199,7 @@ the database first (for the compose database from the host, use the
 | Run the worker | `taskiq worker taskiq_app:broker --fs-discover --tasks-pattern "components/*/tasks.py"` |
 | Start PostgreSQL and RabbitMQ | `docker compose up -d postgres rabbitmq` |
 | Start the whole stack | `docker compose up --build` |
-| Stop the stack | `docker compose down` |
+| Stop the stack | `docker compose down` (keeps data; `down -v` deletes the volumes) |
 | Apply migrations | `alembic upgrade head` |
 | Show current revision | `alembic current` |
 | New migration | `alembic revision --autogenerate -m "message"` (review it before applying; register each component's `models` in `migrations/env.py`) |

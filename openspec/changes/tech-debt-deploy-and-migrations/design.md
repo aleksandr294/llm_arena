@@ -44,7 +44,17 @@ helpers).
    `OPENAI_API_KEY:-`, `ANTHROPIC_API_KEY:-`, `LLM_MAX_CONCURRENCY:-4`,
    `PRICING_FILE:-`, `JWT_ACCESS_TTL_SECONDS:-900`,
    `JWT_REFRESH_TTL_SECONDS:-604800`, `JWT_ISSUER:-llm-arena`,
-   `HEALTH_CHECK_TIMEOUT_SECONDS:-2.0`, `API_DOCS_ENABLED:-false`.
+   `HEALTH_CHECK_TIMEOUT_SECONDS:-2.0`, `API_DOCS_ENABLED:-true`.
+   Defaults equal the application defaults at merge time. Deviation: this
+   plan first said `API_DOCS_ENABLED:-false`; it is `true` because that is
+   the current application default (the spec requires equal defaults), and
+   the compose default flips to `false` when `tech-debt-core-api-cleanups`
+   merges. `RABBITMQ_ERLANG_COOKIE:-llm-arena-local-erlang-cookie` is also
+   passed (not a setting of the application): a fixed non-secret internal
+   cookie, independent of the broker password, because the cookie persists
+   in the `rabbitmq-data` volume and the image refuses a changed value; the
+   rabbitmq healthcheck runs as the `rabbitmq` user so the CLI does not
+   create a root-owned cookie first.
    Alternative: `env_file: .env`, rejected: `.env` also holds
    host-oriented `DATABASE_URL`/`RABBITMQ_URL` (localhost) that must not leak
    into the containers, and `${VAR:?}` guards need explicit entries. A test
@@ -89,7 +99,7 @@ helpers).
    calls `fileConfig`).
 9. **Docs.** `docs/migrations.md` and README say "`alembic heads`" instead
    of naming a head and describe revisions `0007`-`0010` (a table: revision,
-   change, downgrade effect); `docs/testing.md` gains the Bandit and
+   change, downgrade effect); `docs/testing.md` gains the Ruff S rules and
    pip-audit commands from `docs/security.md`; README compose section lists
    required and optional variables and the `down -v` warning (volumes now persist).
 
