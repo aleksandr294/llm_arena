@@ -147,21 +147,31 @@ jobs:
             'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
           "$RUNNER_TEMP/audit-tool/bin/pip-audit" --path "$SITE_PACKAGES"
 
-  zap:
-    name: zap
+  sqlmap:
+    name: sqlmap
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
-      - name: Run the ZAP scans against a throwaway instance
-        # ZAP alerts do not fail the job (-I); a failed setup does.
-        run: scripts/ci_zap.sh "$RUNNER_TEMP/zap-reports"
-      - name: Upload ZAP reports
+      - name: Run sqlmap against a throwaway instance
+        # A confirmed injection, an incomplete scan or a failed setup fails
+        # the job.
+        run: scripts/ci_sqlmap.sh "$RUNNER_TEMP/sqlmap-reports"
+      - name: Remove sqlmap session files
+        # They hold the Authorization header. The script removes them on
+        # exit; this covers a run that was cancelled before it could.
+        if: always()
+        run: |
+          find "$RUNNER_TEMP/sqlmap-reports" -type f \( -name target.txt \
+            -o -name 'session.sqlite*' -o -name hashes.txt \) -delete || true
+          find "$RUNNER_TEMP/sqlmap-reports" -type d -name dump \
+            -prune -exec rm -rf {} + || true
+      - name: Upload sqlmap reports
         if: always()
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: zap-reports
-          path: ${{ runner.temp }}/zap-reports
+          name: sqlmap-reports
+          path: ${{ runner.temp }}/sqlmap-reports
           if-no-files-found: warn

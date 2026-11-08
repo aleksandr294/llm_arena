@@ -178,7 +178,8 @@ the database first (for the compose database from the host, use the
 | Types | `mypy` |
 | Static security analysis | `poetry run ruff check --select S components api admin cli.py main.py taskiq_app.py migrations migrations/versions/*.py scripts` |
 | Dependency audit (needs network) | `poetry run pip-audit` |
-| Dynamic scan (OWASP ZAP) | throwaway instance only, see [Security](docs/security.md) |
+| SQL injection scan (sqlmap, runs in CI) | `scripts/ci_sqlmap.sh <reports-dir>`, throwaway instance only, see [CI](docs/ci.md) |
+| Dynamic scan (OWASP ZAP, manual) | throwaway instance only, see [Security](docs/security.md) |
 | All pre-commit hooks | `pre-commit run --all-files` |
 | Real-provider tests (opt-in, cost money) | see [Testing](docs/testing.md) |
 | Kan board helper | `scripts/kan.py`, see "Task tracking (Kan)" in `CLAUDE.md` |

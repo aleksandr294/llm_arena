@@ -19,7 +19,8 @@ is in [accepted risks](#accepted-risks), and what is still open is in
 | Doc pointer test | `poetry run pytest -q tests/security/test_security_doc_pointers.py` | Fails when a path or test cited in the OWASP tables no longer exists |
 | Suppression reasons | `poetry run pytest -q tests/security/test_nosec_reasons.py` | Fails on a production `# noqa: S...` without a reason |
 | Container smoke test | [Container hardening](#container-hardening) | Throwaway network, database and port |
-| ZAP baseline and API scan | [How to run the ZAP scans](#how-to-run-the-zap-scans) | Throwaway instance only |
+| sqlmap SQL injection scan | `scripts/ci_sqlmap.sh <reports-dir>`, see [Dynamic scan](#dynamic-scan) | Runs in the pull-request workflow ([CI](ci.md)); throwaway instance, needs Docker and network |
+| ZAP baseline and API scan | [How to run the ZAP scans](#how-to-run-the-zap-scans) | Manual only; throwaway instance only |
 
 Export the settings first (`set -a; . ./.env; set +a`) for the tests, as in
 the README.
@@ -156,9 +157,43 @@ Result on 2026-10-18: the process ran as uid 10001, migrations applied,
 and `create-superadmin` plus `POST /api/v1/auth/login` worked (200,
 `Cache-Control: no-store`).
 
-## Dynamic scan (OWASP ZAP)
+## Dynamic scan
 
-### How to run the ZAP scans
+Two tools, one automated and one manual. sqlmap tests the API for SQL
+injection on every pull request. OWASP ZAP (headers, CSP, passive findings)
+is no longer part of CI and is run by hand when needed.
+
+### SQL injection scan (sqlmap, in CI)
+
+`scripts/ci_sqlmap.sh <reports-dir>` starts a throwaway instance (generated
+credentials, scratch PostgreSQL and RabbitMQ on a private Docker network),
+seeds an organization, a user, a dataset with a test case and an experiment
+through the API, builds a plan from `/openapi.json`, sends each planned
+request once to see whether its parameters reach their handler, and runs
+sqlmap (pinned version, in a `python:3.12-slim` container) on those that do:
+free-string parameters of every operation, public ones unauthenticated and
+the rest with the throwaway superadmin or organization admin token. Options,
+completeness rules and limitations are in [CI](ci.md). A confirmed injection,
+an incomplete scan, a baseline server error or connection failure, or a
+credential in the reports fails the job; the output is the `sqlmap-reports`
+artifact, whose `reached.txt` and `plan.json` list every parameter as scanned
+(with its baseline status), not reached (with the status) or skipped (with
+the reason).
+
+Coverage in the last real run: 20 string parameters in 12 of the 33
+operations; all 20 were reached (baseline 2xx, or 401 for public sign-in
+operations). 91 parameters were skipped (UUID, integer, enum, boolean,
+date-time, number, alternatives of `anyOf`, one object), and 21 operations
+have no string parameter. Not covered: HTTP headers and cookies (level 2),
+the admin panel, form posts, other seeded roles and states. Boolean-blind
+detection is weak where responses rarely differ, so detection leans on error
+and time-based techniques. sqlmap tolerates a retried connection, so
+time-based coverage can degrade on a flaky target without failing the job.
+A clean run is evidence, not proof.
+
+### OWASP ZAP (manual only)
+
+#### How to run the ZAP scans
 
 Only against a throwaway instance (own network, scratch database, throwaway
 credentials), never against the developer stack. Use unique `audit-zap-`
@@ -213,7 +248,7 @@ docker network rm audit-zap-net; docker rmi llm-arena:audit-zap
 The scanner reaches the API by its network name, so the scan never touches
 host port 8000. Reports contain no token (checked by searching them for it).
 
-### ZAP results
+#### ZAP results
 
 First run on 2026-10-18 and re-scan on 2026-10-19 after the Content Security
 Policy was added. ZAP 2.17.0 (`ghcr.io/zaproxy/zaproxy:stable`), PostgreSQL
@@ -322,6 +357,7 @@ applicable.
 | Bandit B105 | Low | `cli.py` (`PASSWORD_ENV`) | Justified: the constant is the name of an environment variable, not a password (`# nosec B105` with reason) |
 | Bandit B105 | Low | `components/experiments/utils.py` (`INPUT_TOKEN`) | Justified: prompt template placeholder, not a password (`# nosec B105` with reason) |
 | Bandit B105 | Low | `components/experiments/utils.py` (`EXPECTED_OUTPUT_TOKEN`) | Justified: prompt template placeholder, not a password (`# nosec B105` with reason) |
+| sqlmap | n/a | `scripts/ci_sqlmap.sh` (`sqlmap` CI job, 2026-11-06) | Tool change: the CI `zap` job (report-only, `scripts/ci_zap.sh`) was replaced by the `sqlmap` job, which fails on a confirmed injection; ZAP stays as the manual procedure above and its results below are historical. First clean run against the real API: no injectable parameter, whole run about 2 minutes, 20 string parameters in 12 of 33 operations, all 20 reached by their baseline request (2xx, or 401 for public sign-in). Review found that sqlmap reports a constant 403 as not injectable, so a baseline check now lists unreachable parameters instead of counting them as scanned. Known weakness: boolean-blind detection is weak (values are `x`, responses rarely differ), so the result rests mainly on error and time-based techniques |
 | pip-audit | n/a | all locked dependencies (`poetry run pip-audit`, 2026-10-18) | No findings: the run reported `No known vulnerabilities found`; nothing to upgrade, no package versions changed |
 | pip-audit | Low | `certifi`, `filelock`, `virtualenv` (`poetry run pip-audit`, 2026-10-31) | Accepted: 26 findings, all in dev-tooling transitive dependencies (`pre-commit`'s `virtualenv`/`filelock`; `certifi` via `httpx`/`httpcore`/`requests`), none from `prometheus-client`. None reach the production image (`poetry install --only main --no-root` in the `Dockerfile`) |
 | OWASP A07, API2, API4 | Medium | `components/auth/service.py` (login, refresh) | Follow-up card: no login throttling or lockout (REST and admin panel); mitigated by the documented proxy limit in `docs/authentication.md` and the bounded password-hash concurrency |
