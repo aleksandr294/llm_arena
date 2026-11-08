@@ -217,10 +217,10 @@ Follow the repository's OpenSpec workflow for meaningful behavioral changes.
 6. Implement the approved scope and add regression tests.
 7. Run relevant tests, linting, formatting, and type checks, plus the security gates in the Security section.
 8. Request independent code review and address valid findings.
-9. When the flow is finished, commit the changes on the feature branch following the `git-conventional-commits` skill. Do not push; pushing the branch and opening a pull request happen only when the user explicitly asks.
-10. Report the implementation, checks, limitations, and unresolved issues.
+9. When the flow is finished, commit the changes on the feature branch following the `git-conventional-commits` skill, then push the branch (`git push -u origin <branch>`) and open a pull request against `main` through the GitHub MCP server (the only channel for the PR; `gh` is not used), without asking again. Do this only when the branch is not `main`, the working tree is clean, the required quality checks actually passed and valid review findings are addressed; otherwise stop and report which precondition failed. If the GitHub MCP server is not connected, report that the PR was not opened and do not fall back to another tool. Only the main session publishes; subagents never commit, push or open PRs.
+10. Report the implementation, checks, limitations, unresolved issues and the pull request URL.
 
-Do not push, merge pull requests or bypass required checks without explicit authorization.
+Do not merge pull requests, force-push, push to `main`, skip hooks or bypass required checks without explicit authorization.
 
 Use a proportionate workflow for documentation-only changes and refactoring that does not change behavior.
 
@@ -268,7 +268,7 @@ Report:
 - Tests and quality checks executed and their results.
 - Database migrations and configuration changes.
 - Known limitations and remaining risks.
-- Git branch and pull request status.
+- Git branch, push status and pull request URL (or why the PR was not opened).
 ## Task tracking (Kan)
 
 Tasks live in a local Kan board (http://localhost:3000, board `llm-arena`, ID `tcutdspc0hup`).

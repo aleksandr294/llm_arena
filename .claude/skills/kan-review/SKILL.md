@@ -9,7 +9,7 @@ Tasks live on the Kan board described in CLAUDE.md ("Task tracking (Kan)"). Use 
 
 ## When
 
-After the `reviewer` agent has produced its findings for the change (and the tester has reported). Not before: moving a card to `Review` means an independent review has actually happened.
+After the `reviewer` agent has produced its findings for the change (and the tester has reported) and, when the flow publishes, after the branch is pushed and the PR is opened, so the comment can carry the PR URL. Not before: moving a card to `Review` means an independent review has actually happened.
 
 ## Procedure
 
@@ -27,7 +27,7 @@ Keep it short, plain text (Kan comments are not guaranteed to render Markdown), 
 
 ```
 Review: <change-name>
-Branch: <branch>   Commits: <n or "not committed">   PR: <url or "none">
+Branch: <branch>   Commits: <n or "not committed">   PR: <url, or "none" with the reason>
 
 Verdict: <no blocking findings | fixes pending | blocked>
 
