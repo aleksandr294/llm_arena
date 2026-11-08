@@ -8,6 +8,11 @@ x-app-environment: &app-environment
   MAX_STORED_RESPONSE_CHARS: ${MAX_STORED_RESPONSE_CHARS:-1000000}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   WORKER_METRICS_PORT: ${WORKER_METRICS_PORT:-9100}
+  ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY}
+  ADMIN_SESSION_COOKIE_SECURE: ${ADMIN_SESSION_COOKIE_SECURE}
+  ADMIN_SESSION_TTL_SECONDS: ${ADMIN_SESSION_TTL_SECONDS}
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
 
 x-app: &app
   build: .
@@ -93,14 +98,14 @@ services:
   promtail:
     image: grafana/promtail:3.3.2
     command: ["-config.file=/etc/promtail/config.yml"]
-    security_opt: ["no-new-privileges:true"]
+    security_opt:
+      - label=disable
     volumes:
       # ":Z" relabels for SELinux-enforcing hosts; a no-op elsewhere.
       - ./observability/promtail/config.yml:/etc/promtail/config.yml:ro,Z
       # Read-only access to discover and read the api/worker containers'
       # JSON logs; Promtail never writes to the Docker API.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/podman/podman.sock:/var/run/docker.sock:ro
     depends_on:
       loki:
         condition: service_healthy
