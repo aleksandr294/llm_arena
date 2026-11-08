@@ -32,11 +32,15 @@ The project SHALL provide a documented command that audits the locked dependenci
 - **THEN** the findings register lists it as fixed or accepted with the reason
 
 ### Requirement: Dynamic application scan
-The project SHALL document and run an OWASP ZAP baseline scan and an OpenAPI-driven scan against a locally started instance using throwaway data and credentials, including as a report-only job in the pull-request workflow, and SHALL record every alert of medium risk or higher as fixed or accepted with a reason.
+The project SHALL document and run an OWASP ZAP baseline scan and an OpenAPI-driven scan against a locally started instance using throwaway data and credentials, SHALL run a sqlmap SQL injection scan of the API in the pull-request workflow, and SHALL record every alert of medium risk or higher, and every confirmed injection, as fixed or accepted with a reason.
 
 #### Scenario: Scan against a throwaway instance
 - **WHEN** the dynamic scan is run
 - **THEN** it targets a locally started instance backed by a scratch database and never the developer's real stack
+
+#### Scenario: Injection finding recorded
+- **WHEN** the sqlmap scan confirms an injectable parameter
+- **THEN** the findings register lists it as fixed with a reference, or accepted with a reason and an owner
 
 ### Requirement: Findings register
 The project SHALL keep a findings register in `docs/security.md` listing each finding from the static analysis, dependency audit, dynamic scan, OWASP review and code review with its source, severity, location, and outcome (fixed with reference, or accepted with reason and owner).
