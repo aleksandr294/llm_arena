@@ -88,6 +88,7 @@ PG_DB="sq"
 PG_PASSWORD="$(openssl rand -hex 16)"
 MQ_USER="sq"
 MQ_PASSWORD="$(openssl rand -hex 16)"
+MQ_COOKIE="$(openssl rand -hex 16)"
 JWT_SECRET="$(openssl rand -hex 32)"
 ADMIN_SECRET="$(openssl rand -hex 32)"
 SUPERADMIN_EMAIL="sqlmap@example.com"
@@ -147,6 +148,7 @@ docker run -d --name "$PG" --network "$NET" \
 docker run -d --name "$MQ" --network "$NET" \
   -e RABBITMQ_DEFAULT_USER="$MQ_USER" \
   -e RABBITMQ_DEFAULT_PASS="$MQ_PASSWORD" \
+  -e RABBITMQ_ERLANG_COOKIE="$MQ_COOKIE" \
   rabbitmq:3.13 >/dev/null
 
 ENVS=(
