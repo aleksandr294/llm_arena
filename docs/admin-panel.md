@@ -89,8 +89,11 @@ pin deliberately.
 
 ### Known limits
 
-- No sign-in rate limiting or lockout (the same as REST login): limit
-  `/admin/api/sign-in` at a proxy if the API is exposed.
+- Sign-in is throttled per username like REST login (`AUTH_MAX_FAILED_ATTEMPTS`,
+  `AUTH_LOCKOUT_SECONDS`; a locked sign-in fails like any other). The panel
+  gives no client address, so there is no per-address counter: limit
+  `/admin/api/sign-in` at a proxy for volume. Every attempt is logged as an
+  `admin.sign_in` event.
 - Panel sessions are a separate signed cookie, not REST JWTs; a REST logout
   does not end a panel session. Sign-out in the panel only deletes the cookie
   in the browser: the signed session value stays valid until it expires

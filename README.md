@@ -320,9 +320,11 @@ Known limits:
 - Concurrency is per process: there is no global rate limiter across
   workers, so total in-flight requests are roughly worker processes times
   `LLM_MAX_CONCURRENCY`.
-- There is no login rate limiting (REST or admin panel); limit
-  `/api/v1/auth/login` and `/admin/api/sign-in` at a proxy if the API is
-  exposed.
+- Login, refresh, token validation and admin panel sign-in are throttled
+  with a lockout (see [Authentication](docs/authentication.md)); other
+  endpoints have no request rate limit, so limit volume at a proxy if the API
+  is exposed. Each organization may have a limited number of running
+  experiments (`MAX_ACTIVE_EXPERIMENTS_PER_ORGANIZATION`).
 - Swagger UI and ReDoc load assets from a CDN; set `API_DOCS_ENABLED=false`
   for production exposure.
 

@@ -4,12 +4,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Query, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.auth.dependencies import build_auth_service
-from components.auth.exceptions import AccessTokenRejectedError
+from components.auth.exceptions import (
+    AccessTokenRejectedError,
+    AuthThrottledError,
+)
 from components.auth.service import AuthService
 from components.core.config import SettingsSchema, get_settings
 from components.core.database import get_session
@@ -45,6 +48,21 @@ def unauthorized(detail: str = "Not authenticated") -> HTTPException:
         status.HTTP_401_UNAUTHORIZED,
         detail,
         headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def client_address(request: Request) -> str:
+    """The peer address of the connection. Behind a reverse proxy this is
+    the proxy: ``X-Forwarded-For`` is deliberately not trusted (a client
+    could forge it), so operators limit per client at the proxy as well."""
+    return request.client.host if request.client else "unknown"
+
+
+def throttled(exc: AuthThrottledError) -> HTTPException:
+    return HTTPException(
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        "Too many failed attempts",
+        headers={"Retry-After": str(exc.retry_after)},
     )
 
 

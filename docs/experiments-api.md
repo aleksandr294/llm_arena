@@ -40,7 +40,10 @@ curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/experiments
 `202` and `enqueued` mean the tasks were submitted, not that anything ran:
 poll the experiment detail and its `status_counts`. Errors: unknown
 experiment or dataset `404`; an action not allowed in the current status
-`409`; invalid input `422` with `detail` entries that name the field in
+`409`; starting (or retrying) an experiment while the organization already
+has `MAX_ACTIVE_EXPERIMENTS_PER_ORGANIZATION` running experiments (default
+20; experiments that are only created, or already finished, do not count)
+`429`; invalid input `422` with `detail` entries that name the field in
 `loc` (for example `["body", "config", "targets"]`).
 
 Execution needs a running worker (see Run). Limits: at most 10 targets, at

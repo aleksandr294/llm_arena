@@ -43,6 +43,20 @@ class SettingsSchema(BaseSettings):
     jwt_access_ttl_seconds: int = Field(default=900, ge=1)
     jwt_refresh_ttl_seconds: int = Field(default=604800, ge=1)
     jwt_issuer: str = Field(default="llm-arena", min_length=1)
+    # Seconds of clock skew accepted for ``exp`` and ``iat`` when decoding.
+    jwt_leeway_seconds: int = Field(default=5, ge=0, le=60)
+
+    # Failed attempts (per account and per client address) that lock
+    # sign-in, and the lockout length; it is also the counting window.
+    auth_max_failed_attempts: int = Field(default=5, ge=1)
+    # The same per client address; higher because many users can share one
+    # address (NAT, a proxy, a gateway calling /auth/validate).
+    auth_max_failed_attempts_per_address: int = Field(default=50, ge=1)
+    auth_lockout_seconds: int = Field(default=900, ge=1)
+
+    # Experiments of one organization that may be running at once;
+    # starting another answers 429.
+    max_active_experiments_per_organization: int = Field(default=20, ge=1)
 
     # Admin panel (fastadmin). Blank means unset and the panel is not
     # mounted. Signs the panel's own session cookie, separate from the JWTs.

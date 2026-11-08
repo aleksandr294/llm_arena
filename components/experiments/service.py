@@ -16,6 +16,7 @@ from components.datasets.repository import (
 from components.experiments.enums import ExperimentStatus, ResultStatus
 from components.experiments.exceptions import (
     ExperimentNotFoundError,
+    ExperimentQuotaError,
     ExperimentValidationError,
     InvalidTransitionError,
 )
@@ -32,6 +33,7 @@ from components.experiments.utils import (
     render_prompt,
     rendered_length,
 )
+from components.organizations.repository import OrganizationRepository
 from components.third_party.llm.exceptions import (
     ProviderNotConfiguredError,
     UnsupportedProviderError,
@@ -39,6 +41,9 @@ from components.third_party.llm.exceptions import (
 from components.third_party.llm.service import LLMService
 
 MAX_RESULTS = 10_000
+# Used when the entry point passes no limit (tests, scripts); the API wires
+# ``max_active_experiments_per_organization`` from settings.
+DEFAULT_MAX_ACTIVE_EXPERIMENTS = 20
 
 # Port for the task layer: receives the ids of results to execute. Kept as a
 # plain callable so the service never imports Taskiq.
@@ -69,13 +74,18 @@ class ExperimentService:
         session: AsyncSession,
         llm_service: LLMService,
         enqueue: EnqueueResults,
+        max_active_experiments: int | None = None,
     ) -> None:
+        if max_active_experiments is None:
+            max_active_experiments = DEFAULT_MAX_ACTIVE_EXPERIMENTS
+        self.max_active_experiments = max_active_experiments
         self.session = session
         self.llm = llm_service
         self.enqueue = enqueue
         self.datasets = DatasetRepository(session)
         self.cases = TestCaseRepository(session)
         self.experiments = ExperimentRepository(session)
+        self.organizations = OrganizationRepository(session)
         self.results = ExperimentResultRepository(session)
 
     def _check_providers(self, data: ExperimentCreateSchema) -> None:
@@ -182,6 +192,19 @@ class ExperimentService:
             raise ExperimentNotFoundError(experiment_id)
         return experiment
 
+    async def _ensure_capacity(self, experiment: Experiment) -> None:
+        """Raises ``ExperimentQuotaError`` when the organization already runs
+        the maximum number of experiments. The organization row is locked
+        (after the experiment row, the same order everywhere), so concurrent
+        starts count one after the other and cannot overshoot. Only running
+        experiments count: a created, not yet started one queues nothing."""
+        await self.organizations.get_for_update(experiment.organization_id)
+        running = await self.experiments.count_running(
+            experiment.organization_id
+        )
+        if running >= self.max_active_experiments:
+            raise ExperimentQuotaError(self.max_active_experiments)
+
     async def start(
         self, principal: Principal, experiment_id: uuid.UUID
     ) -> int:
@@ -198,6 +221,7 @@ class ExperimentService:
                 experiment_id, experiment.status, "start"
             )
         if experiment.status == ExperimentStatus.PENDING.value:
+            await self._ensure_capacity(experiment)
             experiment.status = ExperimentStatus.RUNNING.value
             experiment.started_at = datetime.now(UTC)
         pending = await self.results.list_ids_by_status(
@@ -238,6 +262,7 @@ class ExperimentService:
             raise InvalidTransitionError(
                 experiment_id, experiment.status, "retry"
             )
+        await self._ensure_capacity(experiment)
         ids = await self.results.reset_failed(experiment_id)
         experiment.status = ExperimentStatus.RUNNING.value
         experiment.finished_at = None

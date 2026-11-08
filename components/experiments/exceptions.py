@@ -24,3 +24,14 @@ class ExperimentValidationError(Exception):
         super().__init__(message)
         self.field = field
         self.message = message
+
+
+class ExperimentQuotaError(Exception):
+    """The organization already has the maximum number of running
+    experiments."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(
+            f"the organization already has {limit} active experiments"
+        )
+        self.limit = limit

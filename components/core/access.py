@@ -5,12 +5,25 @@ from sqlalchemy import ColumnElement, false, true
 
 from components.core.enums import Role
 from components.core.exceptions import OrganizationRequiredError
+from components.core.logging import log_security_event
 from components.core.schemas import Principal
+
+
+def log_access_denied(principal: Principal, reason: str) -> None:
+    """Record a permission denial (``access.denied``); ``reason`` is a fixed
+    word such as ``role`` or ``organization_required``."""
+    log_security_event(
+        "access.denied",
+        user_id=principal.user_id,
+        outcome="denied",
+        reason=reason,
+    )
 
 
 def require_organization(principal: Principal) -> uuid.UUID:
     """The organization new data is recorded under."""
     if principal.organization_id is None:
+        log_access_denied(principal, "organization_required")
         raise OrganizationRequiredError
     return principal.organization_id
 
