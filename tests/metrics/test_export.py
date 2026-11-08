@@ -24,8 +24,6 @@ from components.metrics.utils import neutralize
 from tests.access import ROOT, seed_principal
 from tests.metrics.helpers import Row, seed
 
-pytestmark = pytest.mark.integration
-
 Factory = async_sessionmaker[AsyncSession]
 
 

@@ -13,8 +13,6 @@ from components.core.database import (
     session_scope,
 )
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture(autouse=True)
 async def _probe_table(engine: AsyncEngine) -> AsyncIterator[None]:

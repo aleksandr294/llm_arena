@@ -19,8 +19,6 @@ from components.core.schemas import Principal
 from tests.access import Actors
 from tests.metrics.helpers import Row, seed
 
-pytestmark = pytest.mark.integration
-
 Factory = async_sessionmaker[AsyncSession]
 
 

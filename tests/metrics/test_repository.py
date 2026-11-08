@@ -8,8 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from components.metrics.repository import MetricsRepository
 from tests.metrics.helpers import Row, seed
 
-pytestmark = pytest.mark.integration
-
 Factory = async_sessionmaker[AsyncSession]
 
 

@@ -24,8 +24,6 @@ from tests.access import PASSWORD, Actors, Factory
 from tests.experiments.helpers import Enqueued, FakeLLM
 from tests.metrics.helpers import Row, seed
 
-pytestmark = pytest.mark.integration
-
 ALLOWED = ["staff_a", "admin", "superadmin"]
 DENIED = ["staff_b", "admin_other"]
 PREFIX = "/api/v1"

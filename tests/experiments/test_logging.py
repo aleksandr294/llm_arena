@@ -27,8 +27,6 @@ from tests.experiments.helpers import (
     scope_of,
 )
 
-pytestmark = pytest.mark.integration
-
 URL = "/api/v1/experiments"
 API_KEY = "sk-SENTINEL-KEY-71c2"
 PROMPT = "SENTINEL-PROMPT-4e1d"

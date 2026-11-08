@@ -12,8 +12,10 @@ with real sockets instead of the in-process transport.
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
+from typing import IO
 
 import httpx
 import pytest
@@ -25,9 +27,8 @@ from tests.access import PASSWORD
 from tests.admin.helpers import World
 from tests.admin.panel_process import API, ROOT, child_environment
 
-pytestmark = pytest.mark.integration
-
 COOKIE = "admin_session_id"
+READY_TIMEOUT = 30.0
 
 
 @pytest.fixture
@@ -35,31 +36,50 @@ def server() -> Iterator[str]:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    process = subprocess.Popen(
-        [sys.executable, "-m", "tests.admin.uvicorn_child", str(port)],
-        cwd=ROOT,
-        env=child_environment(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    base = f"http://127.0.0.1:{port}"
-    try:
-        for _ in range(100):
-            try:
-                if httpx.get(f"{base}/api/v1/health/live").status_code == 200:
-                    break
-            except httpx.TransportError:
-                time.sleep(0.1)
-        else:
-            raise AssertionError("uvicorn did not start")
-        yield base
-    finally:
-        process.terminate()  # our own child, by handle
+    with tempfile.TemporaryFile() as child_output:
+        process = subprocess.Popen(
+            [sys.executable, "-m", "tests.admin.uvicorn_child", str(port)],
+            cwd=ROOT,
+            env=child_environment(),
+            stdout=child_output,
+            stderr=subprocess.STDOUT,
+        )
+        base = f"http://127.0.0.1:{port}"
         try:
-            process.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+            _wait_until_ready(base, process, child_output)
+            yield base
+        finally:
+            process.terminate()  # our own child, by handle
+            try:
+                process.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+
+def _wait_until_ready(
+    base: str, process: "subprocess.Popen[bytes]", child_output: IO[bytes]
+) -> None:
+    """Poll the child until it answers or ``READY_TIMEOUT`` passes; the
+    failure message carries what the child printed."""
+    deadline = time.monotonic() + READY_TIMEOUT
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            break
+        try:
+            if httpx.get(f"{base}/api/v1/health/live").status_code == 200:
+                return
+        except httpx.TransportError:
+            pass
+        time.sleep(0.1)
+    child_output.seek(0)
+    output = child_output.read().decode(errors="replace")
+    state = (
+        f"exited with {process.returncode}"
+        if process.poll() is not None
+        else f"not ready after {READY_TIMEOUT}s"
+    )
+    raise AssertionError(f"uvicorn child {state}; output:\n{output}")
 
 
 async def _sign_in(client: httpx.AsyncClient, email: str) -> dict[str, str]:

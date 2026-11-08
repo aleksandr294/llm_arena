@@ -19,8 +19,6 @@ from components.experiments.models import ExperimentResult
 from tests.access import Actors
 from tests.metrics.helpers import Row, seed
 
-pytestmark = pytest.mark.integration
-
 Factory = async_sessionmaker[AsyncSession]
 RESPONSE = "SENTINEL-RESPONSE-7d3f"
 EXPECTED = "SENTINEL-EXPECTED-19ac"

@@ -6,10 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from components.datasets.models import Dataset
-from conftest import TEST_JWT_SECRET
 from tests.access import Actors
-
-pytestmark = pytest.mark.integration
+from tests.helpers import make_settings
 
 LIMIT = 400
 
@@ -18,18 +16,8 @@ LIMIT = 400
 def app() -> FastAPI:
     """Shadows the root ``app`` fixture with a small body limit."""
     from api.app import create_app
-    from components.core.config import SettingsSchema
 
-    return create_app(
-        SettingsSchema(
-            database_url="postgresql+asyncpg://unused/unused",
-            rabbitmq_url="amqp://unused/",
-            jwt_secret_key=TEST_JWT_SECRET,
-            admin_secret_key=None,
-            max_request_body_bytes=LIMIT,
-            _env_file=None,
-        )
-    )
+    return create_app(make_settings(max_request_body_bytes=LIMIT))
 
 
 async def _dataset_count(

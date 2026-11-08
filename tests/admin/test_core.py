@@ -19,8 +19,6 @@ from components.organizations.models import Organization
 from components.users.models import User
 from tests.admin.helpers import World
 
-pytestmark = pytest.mark.integration
-
 ALL_DATASETS = {"ds_a", "ds_b", "ds_c", "ds_legacy"}
 ALL_EXPERIMENTS = {"exp_a", "exp_b", "exp_c", "exp_legacy", "exp_b_on_a"}
 

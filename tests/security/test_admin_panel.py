@@ -4,7 +4,6 @@ need PostgreSQL (``DATABASE_URL``); the panel runs in a child process."""
 
 import json
 
-import pytest
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -15,8 +14,6 @@ from tests.access import PASSWORD
 from tests.admin.helpers import World
 from tests.admin.panel_process import Panel
 from tests.security.helpers import MARK, SAMPLE_IDS, SAMPLES
-
-pytestmark = pytest.mark.integration
 
 Factory = async_sessionmaker[AsyncSession]
 BULKY = {

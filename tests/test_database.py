@@ -14,8 +14,6 @@ from components.core.database import Base, create_engine, get_session
 from components.core.repository import BaseRepository
 from tests.helpers import checked_database_url
 
-pytestmark = pytest.mark.integration
-
 
 class ProbeModel(Base):
     __tablename__ = "persistence_probe"

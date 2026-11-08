@@ -2,13 +2,41 @@
 
 import os
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from sqlalchemy import event
 from sqlalchemy.engine import Engine, make_url
 
+if TYPE_CHECKING:
+    from components.core.config import SettingsSchema
+
 GUARD_WORD = "test"
+
+# Test-only signing key; never used outside the test process.
+TEST_JWT_SECRET = "test-only-jwt-signing-key-0123456789abcdef"
+
+
+def make_settings(**overrides: Any) -> "SettingsSchema":
+    """Settings for a test, independent of the developer's ``.env`` file.
+
+    The URLs are placeholders that nothing connects to, ``jwt_secret_key``
+    is the test key and the admin panel is off; ``overrides`` replace any
+    of them. ``_env_file`` is always ``None`` (``tests/test_hermetic_settings``
+    fails a test that builds ``SettingsSchema`` without it). Process
+    environment variables are still read, so tests that need a clean slate
+    use ``monkeypatch`` as ``tests/test_config.py`` does.
+    """
+    from components.core.config import SettingsSchema
+
+    values: dict[str, Any] = {
+        "database_url": "postgresql+asyncpg://unused/unused",
+        "rabbitmq_url": "amqp://unused/",
+        "jwt_secret_key": TEST_JWT_SECRET,
+        "admin_secret_key": None,
+    }
+    values.update(overrides)
+    return SettingsSchema(_env_file=None, **values)
 
 
 def database_name_problem(url: str) -> str | None:

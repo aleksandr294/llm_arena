@@ -46,8 +46,6 @@ from tests.security.helpers import (
     TEMPLATE_SAFE,
 )
 
-pytestmark = pytest.mark.integration
-
 PREFIX = "/api/v1"
 EVALUATORS = {
     "evaluators": [

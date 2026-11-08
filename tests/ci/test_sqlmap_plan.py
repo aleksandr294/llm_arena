@@ -251,10 +251,9 @@ def test_real_app_schema_is_planned(tmp_path: Path) -> None:
     for key, value in env.items():
         os.environ.setdefault(key, value)
     from api.app import create_app
-    from components.core.config import SettingsSchema
+    from tests.helpers import make_settings
 
-    settings = SettingsSchema(
-        _env_file=None,
+    settings = make_settings(
         database_url=env["DATABASE_URL"],
         rabbitmq_url=env["RABBITMQ_URL"],
         jwt_secret_key="k" * 40,
