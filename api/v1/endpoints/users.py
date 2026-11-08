@@ -1,11 +1,18 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.exceptions import RequestValidationError
 
 from api.v1.docs import errors
-from api.v1.utils import SessionDep, get_auth_service, get_principal
+from api.v1.utils import (
+    Limit,
+    Offset,
+    SessionDep,
+    get_auth_service,
+    get_principal,
+    not_found,
+)
 from components.auth.service import AuthService
 from components.core.enums import Role
 from components.core.schemas import Principal
@@ -27,8 +34,6 @@ from components.users.service import UserService
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-Limit = Annotated[int, Query(ge=1, le=100)]
-Offset = Annotated[int, Query(ge=0)]
 PrincipalDep = Annotated[Principal, Depends(get_principal)]
 
 
@@ -44,10 +49,6 @@ ServiceDep = Annotated[UserService, Depends(get_user_service)]
 
 def _forbidden() -> HTTPException:
     return HTTPException(status.HTTP_403_FORBIDDEN, "Forbidden")
-
-
-def _not_found() -> HTTPException:
-    return HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
 
 
 def _invalid(exc: UserInputError) -> RequestValidationError:
@@ -133,7 +134,7 @@ async def get_user(
             await service.get_user(principal, user_id)
         )
     except UserNotFoundError:
-        raise _not_found() from None
+        raise not_found("User not found") from None
 
 
 @router.patch(
@@ -159,7 +160,7 @@ async def update_user(
     except UserForbiddenError:
         raise _forbidden() from None
     except UserNotFoundError:
-        raise _not_found() from None
+        raise not_found("User not found") from None
     except UserConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
     except UserInputError as exc:

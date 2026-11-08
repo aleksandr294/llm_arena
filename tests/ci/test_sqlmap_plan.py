@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from conftest import TEST_JWT_SECRET
 from tests.security.helpers import CORPUS, MARK, huge_cases
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "sqlmap_plan.py"
@@ -244,9 +245,9 @@ def test_cli_plan_and_findings(
 
 def test_real_app_schema_is_planned(tmp_path: Path) -> None:
     env = {
-        "DATABASE_URL": "postgresql+psycopg://u:p@localhost:5432/x_test",
+        "DATABASE_URL": "postgresql+asyncpg://u:p@localhost:5432/x_test",
         "RABBITMQ_URL": "amqp://u:p@localhost:5672//",
-        "JWT_SECRET_KEY": "k" * 40,
+        "JWT_SECRET_KEY": TEST_JWT_SECRET,
     }
     for key, value in env.items():
         os.environ.setdefault(key, value)
@@ -257,7 +258,7 @@ def test_real_app_schema_is_planned(tmp_path: Path) -> None:
         _env_file=None,
         database_url=env["DATABASE_URL"],
         rabbitmq_url=env["RABBITMQ_URL"],
-        jwt_secret_key="k" * 40,
+        jwt_secret_key=TEST_JWT_SECRET,
     )
     doc = create_app(settings).openapi()
     plan = plan_mod.generate_plan(doc, tmp_path)

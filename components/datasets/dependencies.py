@@ -2,8 +2,11 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from components.core.config import SettingsSchema
 from components.datasets.service import DatasetService
 
 
-def build_dataset_service(session: AsyncSession) -> DatasetService:
-    return DatasetService(session)
+def build_dataset_service(
+    session: AsyncSession, settings: SettingsSchema
+) -> DatasetService:
+    return DatasetService(session, settings.max_cases_per_dataset)

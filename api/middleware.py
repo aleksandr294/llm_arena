@@ -28,6 +28,12 @@ SECURITY_HEADERS: Final = (
     ("X-Content-Type-Options", "nosniff"),
     ("X-Frame-Options", "DENY"),
     ("Referrer-Policy", "no-referrer"),
+    (
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    ),
+    ("Cross-Origin-Opener-Policy", "same-origin"),
+    ("Cross-Origin-Resource-Policy", "same-origin"),
 )
 TOO_LARGE_DETAIL: Final = "Request body too large"
 INTERNAL_ERROR_DETAIL: Final = "Internal Server Error"
@@ -38,7 +44,10 @@ INTERNAL_ERROR_DETAIL: Final = "Internal Server Error"
 # policy that lets it work; the sources were taken from the served HTML
 # (tests/core/test_middleware.py checks every script and stylesheet origin
 # against these policies).
-_CDN: Final = "https://cdn.jsdelivr.net"
+# Pinned to the package paths FastAPI's pages load, not the whole origin,
+# so another package served by the same CDN cannot be loaded.
+_SWAGGER_CDN: Final = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/"
+_REDOC_CDN: Final = "https://cdn.jsdelivr.net/npm/redoc@2/"
 _LOCKDOWN: Final = "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 CSP_STRICT: Final = f"default-src 'none'; {_LOCKDOWN}"
 # {inline} is replaced by the hashes of the page's own inline scripts (see
@@ -47,15 +56,15 @@ CSP_STRICT: Final = f"default-src 'none'; {_LOCKDOWN}"
 # set style attributes and inject style elements, and CSP cannot allow
 # those by hash. Script execution is what the policy protects.
 CSP_SWAGGER_UI: Final = (
-    f"default-src 'none'; script-src {_CDN}{{inline}}; "
-    f"style-src {_CDN} 'unsafe-inline'; "
+    f"default-src 'none'; script-src {_SWAGGER_CDN}{{inline}}; "
+    f"style-src {_SWAGGER_CDN} 'unsafe-inline'; "
     "img-src 'self' data: https://fastapi.tiangolo.com; "
     f"font-src 'self' data:; connect-src 'self'; {_LOCKDOWN}"
 )
 # ReDoc renders in a web worker created from a blob: URL and loads its
 # fonts from Google Fonts.
 CSP_REDOC: Final = (
-    f"default-src 'none'; script-src {_CDN}{{inline}}; "
+    f"default-src 'none'; script-src {_REDOC_CDN}{{inline}}; "
     f"style-src https://fonts.googleapis.com 'unsafe-inline'; "
     "img-src 'self' data: https://fastapi.tiangolo.com; "
     "font-src https://fonts.gstatic.com; worker-src blob:; "
@@ -104,6 +113,8 @@ class SecurityMiddleware:
             return
 
         headers = Headers(scope=scope)
+        # ``Connection: close`` is a hop-by-hop header, invalid on HTTP/2+.
+        http1 = scope.get("http_version", "1.1") in ("1.0", "1.1")
         no_store = self._wants_no_store(scope["path"], headers)
         started = False
         exceeded = False
@@ -118,7 +129,7 @@ class SecurityMiddleware:
                 return
             if exceeded and not started:
                 replaced = True
-                await self._too_large(send_wrapper_raw)
+                await self._too_large(send_wrapper_raw, http1)
                 return
             await send_wrapper_raw(message)
 
@@ -152,7 +163,7 @@ class SecurityMiddleware:
             await send(message)
 
         if self._declared_length(headers) > self.max_body_bytes:
-            await self._too_large(send_wrapper_raw)
+            await self._too_large(send_wrapper_raw, http1)
             return
 
         received = 0
@@ -183,7 +194,7 @@ class SecurityMiddleware:
                 await self._internal_error(send_wrapper_raw)
         # Too late to change a response that already started.
         if exceeded and not started:
-            await self._too_large(send_wrapper_raw)
+            await self._too_large(send_wrapper_raw, http1)
 
     def _decorate(self, message: Message, policy: str, no_store: bool) -> None:
         # ASGI allows a response start without a headers list.
@@ -263,17 +274,19 @@ class SecurityMiddleware:
         await send({"type": "http.response.body", "body": body})
 
     @staticmethod
-    async def _too_large(send: Send) -> None:
+    async def _too_large(send: Send, http1: bool) -> None:
         body = json.dumps({"detail": TOO_LARGE_DETAIL}).encode()
+        headers = [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+        ]
+        if http1:
+            headers.append((b"connection", b"close"))
         await send(
             {
                 "type": "http.response.start",
                 "status": 413,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"content-length", str(len(body)).encode()),
-                    (b"connection", b"close"),
-                ],
+                "headers": headers,
             }
         )
         await send({"type": "http.response.body", "body": body})

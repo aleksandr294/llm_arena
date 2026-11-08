@@ -18,6 +18,7 @@ from components.evaluation.enums import OutcomeStatus
 from components.third_party.llm.enums import ProviderName
 
 MAX_EVALUATORS = 20
+EVALUATOR_ID_MAX = 64
 MAX_VALUES = 20
 VALUE_MAX = 1000
 MAX_FIELD_PATHS = 50
@@ -48,7 +49,7 @@ def _valid_path(value: str) -> str:
 
 EvaluatorIdStr = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=64),
+    StringConstraints(min_length=1, max_length=EVALUATOR_ID_MAX),
     AfterValidator(reject_nul),
 ]
 ValueStr = Annotated[

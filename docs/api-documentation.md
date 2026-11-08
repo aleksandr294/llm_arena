@@ -16,7 +16,8 @@ Swagger UI: run `POST /api/v1/auth/login` there (or with curl), copy the
 expire (15 minutes by default): log in again or use `POST /auth/refresh`, and
 re-authorize.
 
-Set `API_DOCS_ENABLED=false` to turn all three off (they answer 404); the API
-itself is unaffected. Swagger UI and ReDoc load their JavaScript and CSS from
-a CDN by default (FastAPI's stock behaviour), so opening them contacts a
-third party; set `API_DOCS_ENABLED=false` for production exposure.
+The three endpoints are off by default and answer 404; set
+`API_DOCS_ENABLED=true` to serve them (`.env.example` does, for local
+development). The API itself is unaffected. Swagger UI and ReDoc load their
+JavaScript and CSS from a CDN (FastAPI's stock behaviour), so opening them
+contacts a third party; leave them off for production exposure.

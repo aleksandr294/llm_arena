@@ -13,3 +13,7 @@ class BaseLLMProvider(ABC):
     @abstractmethod
     async def generate(self, request: LLMRequestSchema) -> LLMResponseSchema:
         """Send the request; raise ``LLMProviderError`` on any failure."""
+
+    async def aclose(self) -> None:
+        """Release the HTTP client; the default has nothing to release."""
+        return None

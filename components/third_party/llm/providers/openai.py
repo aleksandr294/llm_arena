@@ -29,6 +29,9 @@ class OpenAIProvider(BaseLLMProvider):
         # SDK retries are disabled: the platform owns the retry policy.
         self._client = client or AsyncOpenAI(api_key=api_key, max_retries=0)
 
+    async def aclose(self) -> None:
+        await self._client.close()
+
     async def generate(self, request: LLMRequestSchema) -> LLMResponseSchema:
         messages: list[dict[str, str]] = []
         if request.system_prompt:

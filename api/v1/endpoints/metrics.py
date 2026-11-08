@@ -2,11 +2,17 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from api.v1.docs import errors
-from api.v1.utils import SessionDep, get_principal
+from api.v1.utils import (
+    Limit,
+    Offset,
+    SessionDep,
+    get_principal,
+    not_found,
+)
 from components.core.config import get_settings
 from components.core.database import SessionScope, session_scope
 from components.core.schemas import Principal
@@ -22,9 +28,6 @@ from components.metrics.schemas import (
 from components.metrics.service import MetricsService
 
 router = APIRouter(prefix="/experiments", tags=["metrics"])
-
-Limit = Annotated[int, Query(ge=1, le=100)]
-Offset = Annotated[int, Query(ge=0)]
 
 
 def get_pricing_file() -> str | None:
@@ -48,10 +51,6 @@ ServiceDep = Annotated[MetricsService, Depends(get_metrics_service)]
 PrincipalDep = Annotated[Principal, Depends(get_principal)]
 
 
-def _not_found() -> HTTPException:
-    return HTTPException(status.HTTP_404_NOT_FOUND, "Experiment not found")
-
-
 @router.get(
     "/{experiment_id}/summary",
     response_model=SummarySchema,
@@ -64,7 +63,7 @@ async def metrics_summary(
     try:
         return await service.summary(principal, experiment_id)
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
 
 
 @router.get(
@@ -79,7 +78,7 @@ async def metrics_comparison(
     try:
         return await service.comparison(principal, experiment_id)
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
 
 
 @router.get(
@@ -101,7 +100,7 @@ async def metrics_cases(
             principal, experiment_id, limit, offset, include_responses
         )
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
 
 
 @router.get(
@@ -131,7 +130,7 @@ async def export_experiment(
             lambda session: build_metrics_service(session, pricing_file),
         )
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
     is_json = export_format is ExportFormat.JSON
     # Responses are on by default for JSON and off for CSV.
     include = is_json if include_responses is None else include_responses

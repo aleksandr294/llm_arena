@@ -56,16 +56,43 @@ async def _start_worker_metrics_server(_state: TaskiqState) -> None:
     )
 
 
-_broker_lock = asyncio.Lock()
-_broker_started = False
+class _BrokerState:
+    """Start state of the API process's broker. The lock is created for the
+    running event loop (an ``asyncio.Lock`` binds to the first loop that
+    waits on it), so a second loop (tests, reload) gets its own."""
+
+    def __init__(self) -> None:
+        self.started = False
+        self._lock: asyncio.Lock | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._loop is not loop:
+            self._lock = asyncio.Lock()
+            self._loop = loop
+        return self._lock
+
+
+_state = _BrokerState()
 
 
 async def ensure_broker_started() -> None:
     """Start the broker once for processes that are not workers (the API).
     Lazy so a RabbitMQ outage does not stop the API from booting; a failed
     startup is retried on the next call."""
-    global _broker_started
-    async with _broker_lock:
-        if not _broker_started:
+    async with _state.lock():
+        if not _state.started:
             await broker.startup()
-            _broker_started = True
+            _state.started = True
+
+
+async def shutdown_broker() -> None:
+    """Shut the broker down if ``ensure_broker_started`` started it; a no-op
+    otherwise. Called when the API stops."""
+    async with _state.lock():
+        if _state.started:
+            try:
+                await broker.shutdown()
+            finally:
+                _state.started = False
