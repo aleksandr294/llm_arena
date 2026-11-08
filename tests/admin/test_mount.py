@@ -21,8 +21,8 @@ from starlette.routing import Mount
 
 from admin import _export_environment, mount_admin
 from api.app import create_app
-from components.core.config import SettingsSchema, get_settings
-from conftest import TEST_JWT_SECRET
+from components.core.config import get_settings
+from tests.helpers import TEST_JWT_SECRET, make_settings
 
 ROOT = Path(__file__).resolve().parents[2]
 ADMIN_SECRET = "admin-secret-for-tests-0123456789abcdef-xyz"
@@ -271,25 +271,13 @@ def test_invalid_admin_secret_fails_startup_without_echo(
 
 
 def test_export_environment_requires_the_admin_secret() -> None:
-    settings = SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-        jwt_secret_key=TEST_JWT_SECRET,
-        admin_secret_key=None,
-        _env_file=None,
-    )
+    settings = make_settings()
     with pytest.raises(RuntimeError, match="ADMIN_SECRET_KEY is not set"):
         _export_environment(settings)
 
 
 def test_mount_admin_without_secret_returns_false() -> None:
-    settings = SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-        jwt_secret_key=TEST_JWT_SECRET,
-        admin_secret_key=None,
-        _env_file=None,
-    )
+    settings = make_settings()
     app = FastAPI()
     assert mount_admin(app, settings) is False
     assert not [r for r in app.routes if isinstance(r, Mount)]

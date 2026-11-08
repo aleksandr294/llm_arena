@@ -1,6 +1,5 @@
 """Nothing sensitive reaches the logs while the panel is used."""
 
-import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -10,8 +9,6 @@ from components.users.models import User
 from tests.access import PASSWORD
 from tests.admin.helpers import World
 from tests.admin.panel_process import API, Panel
-
-pytestmark = pytest.mark.integration
 
 INPUT = "SENTINEL-CASE-INPUT-7f3a"
 EXPECTED = "SENTINEL-EXPECTED-91bc"

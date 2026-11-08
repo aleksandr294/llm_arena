@@ -33,8 +33,6 @@ from components.users.models import User
 from components.users.repository import UserRepository
 from tests.auth.helpers import PASSWORD, Factory, seed_user
 
-pytestmark = pytest.mark.integration
-
 
 class Api:
     """Each call uses a fresh session, like one HTTP request."""
@@ -366,7 +364,11 @@ async def test_logout_is_idempotent(api: Api, session_factory: Factory) -> None:
     user = await seed_user(session_factory)
     pair = await api.login(user.email)
     await api.logout(pair.refresh_token)
+    # The second logout of the same token succeeds and the token stays
+    # unusable.
     await api.logout(pair.refresh_token)
+    with pytest.raises(InvalidRefreshTokenError):
+        await api.refresh(pair.refresh_token)
     unknown = create_refresh_token(api.settings, user.user_id, uuid.uuid4())
     await api.logout(unknown.token)
 

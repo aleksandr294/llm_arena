@@ -21,8 +21,6 @@ from components.users.models import User
 from components.users.repository import UserRepository
 from tests.helpers import checked_database_url
 
-pytestmark = pytest.mark.integration
-
 _MODELS = (Organization, User, RefreshToken)
 
 

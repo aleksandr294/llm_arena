@@ -2,7 +2,6 @@ import asyncio
 import base64
 import json
 import threading
-import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -30,19 +29,14 @@ from components.auth.security import (
     verify_password,
 )
 from components.core.config import SettingsSchema
+from tests.helpers import make_settings
 
 SECRET = "unit-test-signing-key-0123456789abcdefghij"
 PASSWORD = "correct horse battery"
 
 
 def _settings(**overrides: Any) -> SettingsSchema:
-    values: dict[str, Any] = {
-        "database_url": "postgresql://x",
-        "rabbitmq_url": "amqp://x",
-        "jwt_secret_key": SECRET,
-        **overrides,
-    }
-    return SettingsSchema(_env_file=None, **values)
+    return make_settings(**{"jwt_secret_key": SECRET, **overrides})
 
 
 # --- passwords -------------------------------------------------------------
@@ -68,8 +62,23 @@ async def test_verify_malformed_hash_is_false_not_error() -> None:
     assert await verify_password("not-a-hash", PASSWORD) is False
 
 
-async def test_dummy_verification_completes_without_error() -> None:
+async def test_dummy_verification_runs_one_verification_against_the_dummy_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+    real_verify = security._verify
+
+    def spy(password_hash: str, password: str) -> bool:
+        calls.append((password_hash, password))
+        return real_verify(password_hash, password)
+
+    monkeypatch.setattr(security, "_verify", spy)
+
     await verify_dummy_password(PASSWORD)
+    # One verification of the password against the fixed dummy hash, which
+    # is a valid hash (so the full Argon2 cost is paid) that never matches.
+    assert calls == [(security._DUMMY_HASH, PASSWORD)]
+    assert await verify_password(security._DUMMY_HASH, PASSWORD) is False
 
 
 async def test_current_hash_does_not_need_rehash() -> None:
@@ -84,7 +93,15 @@ def test_outdated_hash_needs_rehash() -> None:
 
 @pytest.mark.parametrize("length", [12, 128])
 def test_policy_accepts_boundaries(length: int) -> None:
+    # Raises PasswordPolicyError when rejected; the neighbours just outside
+    # the boundary are rejected below.
     validate_password_policy("a" * length)
+
+
+@pytest.mark.parametrize("length", [11, 129])
+def test_policy_rejects_just_outside_the_boundaries(length: int) -> None:
+    with pytest.raises(PasswordPolicyError):
+        validate_password_policy("a" * length)
 
 
 @pytest.mark.parametrize(
@@ -341,12 +358,18 @@ def test_decode_without_expiry_check_still_verifies_the_rest() -> None:
 async def _max_concurrency(monkeypatch: pytest.MonkeyPatch) -> int:
     lock = threading.Lock()
     state = {"running": 0, "max": 0}
+    # Set once as many verifications as the limit allows run at the same
+    # time; the first ones wait for it, so they overlap without a sleep.
+    saturated = threading.Event()
 
     def slow_verify(password_hash: str, password: str) -> bool:
         with lock:
             state["running"] += 1
             state["max"] = max(state["max"], state["running"])
-        time.sleep(0.05)
+            if state["running"] >= security.HASH_CONCURRENCY_LIMIT:
+                saturated.set()
+        # Bounded: a limit that never saturates fails the test, not hangs it.
+        saturated.wait(timeout=10)
         with lock:
             state["running"] -= 1
         return True
@@ -362,7 +385,7 @@ async def test_password_hashing_concurrency_is_bounded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     peak = await _max_concurrency(monkeypatch)
-    assert 1 < peak <= security.HASH_CONCURRENCY_LIMIT
+    assert peak == security.HASH_CONCURRENCY_LIMIT
 
 
 def test_semaphore_works_under_several_event_loops(
@@ -370,4 +393,4 @@ def test_semaphore_works_under_several_event_loops(
 ) -> None:
     for _ in range(2):
         peak = asyncio.run(_max_concurrency(monkeypatch))
-        assert 1 < peak <= security.HASH_CONCURRENCY_LIMIT
+        assert peak == security.HASH_CONCURRENCY_LIMIT

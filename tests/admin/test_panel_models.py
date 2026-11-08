@@ -23,8 +23,6 @@ from tests.admin.test_core import (
     USERS,
 )
 
-pytestmark = pytest.mark.integration
-
 ACTORS = list(DATASETS)
 READ_ONLY_MODELS = (
     "Dataset",

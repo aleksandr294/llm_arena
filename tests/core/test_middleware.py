@@ -20,7 +20,7 @@ from starlette.types import Message, Receive, Scope, Send
 from api.app import create_app
 from api.middleware import CSP_STRICT, SecurityMiddleware
 from components.core.config import SettingsSchema
-from conftest import TEST_JWT_SECRET
+from tests.helpers import TEST_JWT_SECRET, make_settings
 
 ROOT = Path(__file__).resolve().parents[2]
 LIMIT = 100
@@ -32,14 +32,7 @@ SECURITY = {
 
 
 def _settings(**overrides: Any) -> SettingsSchema:
-    return SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-        jwt_secret_key=TEST_JWT_SECRET,
-        admin_secret_key=None,
-        _env_file=None,
-        **overrides,
-    )
+    return make_settings(**overrides)
 
 
 def _client(app: Any) -> AsyncClient:

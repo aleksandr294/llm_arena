@@ -22,15 +22,13 @@ import cli
 import main
 from api.app import create_app
 from components.auth.dependencies import build_auth_service
+from components.auth.exceptions import InvalidCredentialsError
 from components.core import database
-from components.core.config import SettingsSchema
 from components.core.database import Base
 from components.core.enums import Role
 from components.users.models import User
 from tests.auth.helpers import MODELS
-from tests.helpers import checked_database_url
-
-pytestmark = pytest.mark.integration
+from tests.helpers import checked_database_url, make_settings
 
 PASSWORD = "a-strong-passphrase-1"
 EMAIL = "Root@Example.com"
@@ -77,10 +75,7 @@ def _users() -> list[User]:
 
 
 def _login(email: str, password: str) -> bool:
-    settings = SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-    )
+    settings = make_settings()
 
     async def go() -> bool:
         engine = _engine()
@@ -88,7 +83,7 @@ def _login(email: str, password: str) -> bool:
             async with async_sessionmaker(engine)() as s:
                 await build_auth_service(s, settings).login(email, password)
             return True
-        except Exception:
+        except InvalidCredentialsError:
             return False
         finally:
             await engine.dispose()
@@ -248,11 +243,7 @@ def test_main_still_exposes_api_command(
 def test_no_http_route_creates_users() -> None:
     # Built without the admin panel: mounting it imports fastadmin, which
     # fails when another test module already imported it with another key.
-    settings = SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-        admin_secret_key=None,
-    )
+    settings = make_settings()
     methods_by_path: dict[str, set[str]] = {
         getattr(r, "path", ""): getattr(r, "methods", set())
         for r in create_app(settings).routes

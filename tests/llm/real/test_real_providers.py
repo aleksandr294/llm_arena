@@ -8,10 +8,10 @@ import os
 
 import pytest
 
-from components.core.config import SettingsSchema
 from components.third_party.llm.enums import ProviderName
 from components.third_party.llm.schemas import ModelTargetSchema
 from components.third_party.llm.service import LLMService
+from tests.helpers import make_settings
 
 pytestmark = pytest.mark.real_provider
 
@@ -41,10 +41,7 @@ async def test_real_roundtrip(
         pytest.skip("set RUN_REAL_PROVIDER_TESTS=1 to run")
     if not os.environ.get(key_var, "").strip():
         pytest.skip(f"{key_var} is not set")
-    settings = SettingsSchema(
-        database_url="unused",
-        rabbitmq_url="unused",
-    )
+    settings = make_settings()
     target = ModelTargetSchema(
         provider=provider, model=os.environ.get(model_var, default_model)
     )

@@ -11,8 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.helpers import WORKER_ENV, worker_schema
 
-pytestmark = pytest.mark.integration
-
 
 async def test_unqualified_tables_resolve_to_the_workers_schema(
     engine: AsyncEngine,
@@ -47,6 +45,7 @@ async def test_other_workers_schemas_are_never_on_the_path(
     assert path == (schema if schema is not None else '"$user", public')
 
 
+@pytest.mark.integration  # reads DATABASE_URL, opens no fixture
 def test_a_non_test_database_is_refused_before_any_schema_is_touched() -> None:
     url = make_url(os.environ["DATABASE_URL"]).set(database="llm_arena_prod")
     env = {

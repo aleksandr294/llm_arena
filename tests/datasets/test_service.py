@@ -16,8 +16,6 @@ from components.datasets.schemas import (
 )
 from tests.access import Actors
 
-pytestmark = pytest.mark.integration
-
 
 async def _new_dataset(
     factory: async_sessionmaker,  # type: ignore[type-arg]

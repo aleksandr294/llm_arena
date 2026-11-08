@@ -15,8 +15,6 @@ from components.core.database import get_session, session_scope
 from components.datasets.models import Dataset
 from tests.access import Actors
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture(autouse=True)
 def _use_scratch_db(

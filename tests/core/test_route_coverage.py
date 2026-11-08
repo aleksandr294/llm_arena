@@ -10,9 +10,8 @@ from httpx import ASGITransport, AsyncClient
 from starlette.routing import BaseRoute
 
 from api.v1.utils import get_settings_dependency
-from components.core.config import SettingsSchema
 from components.core.database import get_session
-from conftest import TEST_JWT_SECRET
+from tests.helpers import make_settings
 
 # Routes that are public on purpose. Anything else must answer 401 without a
 # token. Adding an entry here is a deliberate decision to expose a route.
@@ -78,11 +77,7 @@ async def test_every_route_requires_a_token_unless_public(
     app: FastAPI,
 ) -> None:
     app.dependency_overrides[get_session] = _no_session
-    app.dependency_overrides[get_settings_dependency] = lambda: SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-        jwt_secret_key=TEST_JWT_SECRET,
-    )
+    app.dependency_overrides[get_settings_dependency] = lambda: make_settings()
     unknown = _others(app)
     assert unknown == [], f"unexpected non-API routes: {unknown}"
 

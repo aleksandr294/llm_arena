@@ -22,8 +22,6 @@ from tests.experiments.helpers import (
 )
 from tests.experiments.test_runner import _experiment, _ids, _row
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture
 def tasks_module(monkeypatch: MonkeyPatch) -> Iterator[ModuleType]:

@@ -20,6 +20,7 @@ from components.third_party.llm.providers import anthropic as anthropic_mod
 from components.third_party.llm.providers import openai as openai_mod
 from components.third_party.llm.schemas import ModelTargetSchema
 from components.third_party.llm.service import LLMService
+from tests.helpers import make_settings
 
 KEY = "sk-SENTINEL-KEY-123"
 PROMPT = "SENTINEL-PROMPT-456"
@@ -31,14 +32,9 @@ HTTP_REQUEST = httpx2.Request("POST", "https://example.invalid/v1")
 
 
 def _settings(**overrides: Any) -> SettingsSchema:
-    values: dict[str, Any] = {
-        "database_url": "postgresql://x",
-        "rabbitmq_url": "amqp://x",
-        "openai_api_key": KEY,
-        "anthropic_api_key": KEY,
-        **overrides,
-    }
-    return SettingsSchema(_env_file=None, **values)
+    return make_settings(
+        **{"openai_api_key": KEY, "anthropic_api_key": KEY, **overrides}
+    )
 
 
 def _install_clients(

@@ -29,8 +29,6 @@ from components.organizations.models import Organization
 from components.users.models import User
 from tests.auth.helpers import PASSWORD, Factory, Seeded, seed_user
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture(autouse=True)
 def _overrides(

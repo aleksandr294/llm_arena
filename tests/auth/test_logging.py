@@ -23,8 +23,6 @@ from components.users.models import User
 from tests.auth.helpers import PASSWORD, Factory, seed_user
 from tests.helpers import checked_database_url
 
-pytestmark = pytest.mark.integration
-
 UNKNOWN_EMAIL = "sentinel-unknown-account@example.com"
 WRONG_PASSWORD = "sentinel-wrong-password-9f3a"
 NEW_PASSWORD = "sentinel-new-password-7c1d"

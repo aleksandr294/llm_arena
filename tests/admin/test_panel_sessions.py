@@ -33,8 +33,6 @@ from tests.admin.panel_process import (
     child_environment,
 )
 
-pytestmark = pytest.mark.integration
-
 COOKIE = "admin_session_id"
 WRONG_SECRET = "a-different-admin-secret-0123456789abcdef-xyz"
 
@@ -96,6 +94,7 @@ def _concrete(path: str) -> str:
     )
 
 
+@pytest.mark.usefixtures("engine")  # the panel child process uses the database
 def test_every_panel_route_needs_a_session_unless_public() -> None:
     routes = _installed_routes()
     registered = set(routes)

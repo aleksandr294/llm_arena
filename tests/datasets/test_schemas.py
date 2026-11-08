@@ -35,7 +35,14 @@ def test_invalid_dataset(payload: dict[str, Any]) -> None:
 
 
 def test_dataset_limits_are_inclusive() -> None:
-    DatasetCreateSchema(name="x" * 255, description="y" * 2000)
+    dataset = DatasetCreateSchema(name="x" * 255, description="y" * 2000)
+
+    assert dataset.name == "x" * 255
+    assert dataset.description == "y" * 2000
+    with pytest.raises(ValidationError):
+        DatasetCreateSchema(name="x" * 256)
+    with pytest.raises(ValidationError):
+        DatasetCreateSchema(name="ok", description="y" * 2001)
 
 
 def test_case_keeps_content_exactly() -> None:
@@ -66,6 +73,14 @@ def test_invalid_case(payload: dict[str, Any]) -> None:
 
 
 def test_case_limits_are_inclusive() -> None:
-    TestCaseCreateSchema(
+    case = TestCaseCreateSchema(
         input="x" * 50000, expected_output="y" * 50000, metadata={"a": {"b": 1}}
     )
+
+    assert case.input == "x" * 50000
+    assert case.expected_output == "y" * 50000
+    assert case.metadata == {"a": {"b": 1}}
+    with pytest.raises(ValidationError):
+        TestCaseCreateSchema(input="x" * 50001)
+    with pytest.raises(ValidationError):
+        TestCaseCreateSchema(input="ok", expected_output="y" * 50001)

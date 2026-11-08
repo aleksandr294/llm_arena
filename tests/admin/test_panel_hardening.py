@@ -5,13 +5,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
-import pytest
 
 from tests.access import PASSWORD
 from tests.admin.helpers import World
 from tests.admin.panel_process import ADMIN_SECRET, API, Panel
-
-pytestmark = pytest.mark.integration
 
 COOKIE = "admin_session_id"
 SENTINELS = {

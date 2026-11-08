@@ -43,7 +43,10 @@ Branch `feat/tech-debt-test-infrastructure`, worktree
    hook). The 43 manual `pytestmark` lines are removed. `addopts = "-rfE
    --strict-markers"` in `pyproject.toml`. Alternative: keep manual marks plus
    a guard test, rejected because the fixture set is the real reason a test
-   needs infrastructure.
+   needs infrastructure. Implementation addition: tests in a module that
+   imports `checked_database_url` (own-engine tests) are marked too; this
+   over-marks unit tests in the same module and does not catch aliased
+   imports, so the CI job without services remains the backstop.
 3. **Migration helpers.** `scratch_url` becomes a fixture in the root
    `conftest.py` (used by two modules); `_seed_legacy_rows`, `_drift`, SQL
    helpers move to `tests/migrations/helpers.py`. `test_0006` and `test_0007`
