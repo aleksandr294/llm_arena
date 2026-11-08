@@ -177,7 +177,10 @@ wait_for() { # <description> <attempts> <command...>
 }
 
 pg_ready() { docker exec "$PG" pg_isready -h 127.0.0.1 -U "$PG_USER" -d "$PG_DB"; }
-mq_ready() { docker exec "$MQ" rabbitmq-diagnostics -q ping; }
+# As the rabbitmq user: a root exec makes the CLI create a root-owned
+# .erlang.cookie in the data directory while the server is still starting,
+# and the server then fails with eacces reading it.
+mq_ready() { docker exec -u rabbitmq "$MQ" rabbitmq-diagnostics -q ping; }
 
 if ! wait_for "PostgreSQL" 45 pg_ready; then
   docker logs --tail 40 "$PG" >&2 || true
