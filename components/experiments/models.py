@@ -35,6 +35,7 @@ class Experiment(Base):
             "created_at",
         ),
         Index("ix_experiments_owner_id_created_at", "owner_id", "created_at"),
+        Index("ix_experiments_dataset_id", "dataset_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -87,6 +88,7 @@ class ExperimentResult(Base):
         Index(
             "ix_experiment_results_experiment_status", "experiment_id", "status"
         ),
+        Index("ix_experiment_results_test_case_id", "test_case_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

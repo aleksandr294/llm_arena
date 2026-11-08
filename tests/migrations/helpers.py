@@ -64,7 +64,7 @@ def schema_drift(url: str) -> list[Any]:
 
     def compare(sync_conn: Any) -> list[Any]:
         ctx = MigrationContext.configure(
-            sync_conn, opts={"include_object": include}
+            sync_conn, opts={"include_object": include, "compare_type": True}
         )
         return list(compare_metadata(ctx, Base.metadata))
 

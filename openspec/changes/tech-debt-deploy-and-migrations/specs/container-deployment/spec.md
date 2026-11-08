@@ -7,7 +7,7 @@ Defines what the Docker Compose stack provides so that `docker compose up --buil
 ## ADDED Requirements
 
 ### Requirement: Tunable settings reach the containers
-The Compose file SHALL pass every operator-tunable setting of the application to the api and worker containers with a default equal to the application default, so that an unset optional variable never reaches the application as an empty string.
+The Compose file SHALL pass every operator-tunable setting of the application to the api and worker containers with a default equal to the application default at merge time, so that an unset optional variable never reaches the application as an empty string.
 
 #### Scenario: Optional variables unset
 - **WHEN** the stack starts with only the required variables set

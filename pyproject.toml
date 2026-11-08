@@ -9,13 +9,13 @@ package-mode = false
 python = ">=3.12,<4.0"
 fastapi = ">=0.121.1"
 pydantic = "^2"
-pydantic-settings = "*"
+pydantic-settings = "^2.16"
 sqlalchemy = {version = "^2", extras = ["asyncio"]}
-asyncpg = "*"
-alembic = "*"
-taskiq = "*"
-taskiq-aio-pika = "*"
-uvicorn = "*"
+asyncpg = "^0.32"
+alembic = "^1.20"
+taskiq = "^0.13"
+taskiq-aio-pika = "^0.6"
+uvicorn = "^0.54"
 openai = "^3.32.0"
 anthropic = "^1.15.0"
 pyjwt = "^2.15.1"
@@ -25,15 +25,16 @@ fastadmin = {version = "~0.10", extras = ["fastapi", "sqlalchemy"]}
 prometheus-client = "^0.21"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "*"
-pytest-asyncio = "*"
-httpx = "*"
-ruff = "*"
-black = "*"
-mypy = "*"
-pre-commit = "*"
+pytest = "^9.2"
+pytest-asyncio = "^1.4"
+httpx = "^0.28"
+ruff = "^0.17"
+black = "^26.10"
+mypy = "^2.4"
+pre-commit = "^4.7"
 pip-audit = "^2.10.1"
 pytest-xdist = "^3.8.0"
+pyyaml = "^6.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -70,9 +71,9 @@ plugins = ["pydantic.mypy"]
 files = ["admin", "api", "components", "tests"]
 explicit_package_bases = true
 
-# fastadmin ships no type information.
+# fastadmin and PyYAML ship no type information (no stubs dependency added).
 [[tool.mypy.overrides]]
-module = ["fastadmin", "fastadmin.*"]
+module = ["fastadmin", "fastadmin.*", "yaml"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
