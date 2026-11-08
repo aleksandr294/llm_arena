@@ -29,6 +29,7 @@ from components.experiments.model_metrics import (
     record_cost,
     record_generation_speed,
     record_latency,
+    record_ttft,
 )
 from components.experiments.models import Experiment
 from components.experiments.repository import (
@@ -225,6 +226,10 @@ class ExperimentRunner:
                     f"Provider request failed ({exc.kind.value})",
                     attempts,
                     request_id=exc.request_id,
+                    finish_reason=exc.finish_reason,
+                    input_tokens=exc.input_tokens,
+                    output_tokens=exc.output_tokens,
+                    total_tokens=exc.total_tokens,
                 )
             except (
                 ProviderNotConfiguredError,
@@ -253,6 +258,7 @@ class ExperimentRunner:
         model = target.model
         try:
             record_latency(provider, model, response.latency_ms)
+            record_ttft(provider, model, response.time_to_first_token_ms)
             record_generation_speed(
                 provider,
                 model,
@@ -331,6 +337,10 @@ class ExperimentRunner:
         message: str,
         attempts: int,
         request_id: str | None = None,
+        finish_reason: str | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        total_tokens: int | None = None,
     ) -> _Outcome:
         return _Outcome(
             ResultStatus.FAILED,
@@ -339,6 +349,11 @@ class ExperimentRunner:
                 "error_kind": kind,
                 "error_message": message,
                 "provider_request_id": _clean(request_id, IDENTIFIER_MAX),
+                "finish_reason": _clean(finish_reason, FINISH_REASON_MAX),
+                # None stays None: unknown is not zero.
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
             },
         )
 

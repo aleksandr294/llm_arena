@@ -293,3 +293,14 @@ def test_admin_cookie_and_docs_flags_parse(monkeypatch: MonkeyPatch) -> None:
 
     assert settings.admin_session_cookie_secure is False
     assert settings.api_docs_enabled is False
+
+
+def test_llm_measure_ttft_defaults_off_and_reads_env(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DB_URL)
+    monkeypatch.setenv("RABBITMQ_URL", MQ_URL)
+    monkeypatch.delenv("LLM_MEASURE_TTFT", raising=False)
+    assert SettingsSchema(_env_file=None).llm_measure_ttft is False
+    monkeypatch.setenv("LLM_MEASURE_TTFT", "true")
+    assert SettingsSchema(_env_file=None).llm_measure_ttft is True

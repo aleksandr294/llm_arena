@@ -8,6 +8,7 @@ RETRYABLE = {
     LLMErrorKind.TIMEOUT: True,
     LLMErrorKind.RATE_LIMIT: True,
     LLMErrorKind.SERVER_ERROR: True,
+    LLMErrorKind.CONNECTION: True,
     LLMErrorKind.AUTHENTICATION: False,
     LLMErrorKind.INVALID_REQUEST: False,
     LLMErrorKind.MALFORMED_RESPONSE: False,
@@ -44,3 +45,13 @@ def test_retryable_override_and_metadata() -> None:
 def test_base_provider_is_abstract() -> None:
     with pytest.raises(TypeError):
         BaseLLMProvider()  # type: ignore[abstract]
+
+
+def test_error_defaults_carry_no_finish_reason_or_usage() -> None:
+    err = LLMProviderError(LLMErrorKind.UNKNOWN, ProviderName.OPENAI)
+    assert err.finish_reason is None
+    assert (err.input_tokens, err.output_tokens, err.total_tokens) == (
+        None,
+        None,
+        None,
+    )
