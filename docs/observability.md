@@ -35,21 +35,36 @@ stack a few minutes of traffic before expecting non-empty graphs.
 | 2 | Request execution time | `http_request_duration_seconds` (Prometheus, same source) | Live |
 | 3 | Task execution time | `task_duration_seconds` (Prometheus, scraped from the worker's `/metrics`) | Live |
 | 4 | Count of failed tasks | `task_runs_total{outcome="failed"}` (Prometheus, same source) | Live |
-| 5 | Model response time (TTFT) and generation speed | `model_call_latency_seconds` and `model_call_generation_speed_tokens_per_second` (Prometheus, worker `/metrics`) | **Partial** — see below |
+| 5 | Model response time (TTFT) and generation speed | `model_call_latency_seconds`, `model_call_generation_speed_tokens_per_second` and, with `LLM_MEASURE_TTFT=true`, `model_call_ttft_seconds` (Prometheus, worker `/metrics`) | **Partial** unless streaming measurement is on — see below |
 | 6 | Cost per request/token | `model_call_cost_estimate_total` (Prometheus, worker `/metrics`); absent when no pricing file is configured | Live |
 
-### Known gap: true TTFT is not measured
+### Time to first token (optional)
 
-The LLM provider adapters (`components/third_party/llm/providers/`) call
-the SDKs non-streaming — one `await ... .create(...)` per request — so
-there is no first-token timestamp to measure. `model_call_latency_seconds`
-is the *total* call latency, and
-`model_call_generation_speed_tokens_per_second` is an *approximation*
-(`output_tokens / total_latency`), not a real time-to-first-token value.
-Both are labeled and documented as such; neither is presented as TTFT.
-Real TTFT needs a streaming mode in both provider adapters — tracked as a
-separate Kan tech-debt card (see the `observability-grafana-loki` OpenSpec
-change for the scope decision).
+By default the provider adapters call the SDKs non-streaming, so there is no
+first-token timestamp. `model_call_latency_seconds` is the *total* call
+latency and `model_call_generation_speed_tokens_per_second` is an
+*approximation* (`output_tokens / total_latency`), not a time-to-first-token
+value.
+
+Set `LLM_MEASURE_TTFT=true` (on the worker) to make both adapters stream
+internally. The time from sending the request to the first non-empty text
+chunk is then recorded in the `model_call_ttft_seconds` histogram (labels
+`provider`, `model`; buckets 0.05 s to 30 s) and is never greater than the
+call latency. Nothing is streamed to API clients, partial text is discarded on
+errors, and results, usage and errors are the same as without streaming (usage
+stays unknown if a compatible endpoint sends none). With the setting off, or
+when no text chunk arrived, nothing is recorded in the TTFT histogram. The
+speed approximation is unchanged either way. Example queries:
+
+```promql
+histogram_quantile(0.95, sum(rate(model_call_ttft_seconds_bucket[5m])) by (le, provider, model))
+sum(rate(model_call_ttft_seconds_sum[5m])) by (provider, model) / sum(rate(model_call_ttft_seconds_count[5m])) by (provider, model)
+```
+
+Error kinds recorded for failed model calls: `timeout`, `rate_limit`,
+`authentication`, `invalid_request`, `server_error`, `malformed_response`,
+`connection` (network failure, retryable; older rows hold `unknown`) and
+`unknown`.
 
 ## GDPR / no-sensitive-data rule
 

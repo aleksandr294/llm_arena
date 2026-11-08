@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 from types import SimpleNamespace
 from typing import Any
@@ -209,13 +210,13 @@ async def test_invalid_request_not_retryable() -> None:
     assert info.value.retryable is False
 
 
-async def test_connection_error_is_retryable_unknown() -> None:
+async def test_connection_error_is_retryable_connection() -> None:
     provider, _ = _provider(
         error=anthropic.APIConnectionError(request=HTTP_REQUEST)
     )
     with pytest.raises(LLMProviderError) as info:
         await provider.generate(REQUEST)
-    assert info.value.kind is LLMErrorKind.UNKNOWN
+    assert info.value.kind is LLMErrorKind.CONNECTION
     assert info.value.retryable is True
 
 
@@ -251,3 +252,224 @@ async def test_logs_do_not_contain_prompt_or_response(
     provider, _ = _provider(_message(content=[_text("SECRET-RESPONSE")]))
     await provider.generate(REQUEST)
     assert "SECRET" not in caplog.text
+
+
+# --- cache tokens, empty completions, injected client ----------------------
+
+
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    [
+        (
+            SimpleNamespace(
+                input_tokens=10,
+                output_tokens=5,
+                cache_creation_input_tokens=20,
+                cache_read_input_tokens=90,
+            ),
+            120,
+        ),
+        (
+            SimpleNamespace(
+                input_tokens=10, output_tokens=5, cache_read_input_tokens=90
+            ),
+            100,
+        ),
+        (SimpleNamespace(input_tokens=10, output_tokens=5), 10),
+        (
+            SimpleNamespace(
+                input_tokens=10,
+                output_tokens=5,
+                cache_creation_input_tokens=None,
+                cache_read_input_tokens=None,
+            ),
+            10,
+        ),
+    ],
+)
+async def test_input_tokens_include_cache_tokens(
+    usage: Any, expected: int
+) -> None:
+    provider, _ = _provider(_message(usage=usage))
+    result = await provider.generate(REQUEST)
+    assert result.usage.input_tokens == expected
+    assert result.usage.output_tokens == 5
+    assert result.usage.total_tokens is None
+
+
+async def test_usage_stays_unknown_when_not_reported() -> None:
+    provider, _ = _provider(_message(usage=None))
+    result = await provider.generate(REQUEST)
+    assert result.usage.input_tokens is None
+    assert result.usage.output_tokens is None
+
+
+async def test_empty_completion_keeps_finish_reason_and_usage() -> None:
+    usage = SimpleNamespace(input_tokens=7, output_tokens=4096)
+    message = _message(content=[], usage=usage)
+    message.stop_reason = "max_tokens"
+    provider, _ = _provider(message)
+    with pytest.raises(LLMProviderError) as info:
+        await provider.generate(REQUEST)
+    err = info.value
+    assert err.kind is LLMErrorKind.MALFORMED_RESPONSE
+    assert err.finish_reason == "max_tokens"
+    assert (err.input_tokens, err.output_tokens) == (7, 4096)
+    assert err.total_tokens is None
+
+
+async def test_empty_completion_without_usage_is_unknown() -> None:
+    provider, _ = _provider(_message(content=[], usage=None))
+    with pytest.raises(LLMProviderError) as info:
+        await provider.generate(REQUEST)
+    assert info.value.input_tokens is None
+    assert info.value.output_tokens is None
+
+
+def test_falsy_injected_client_is_used() -> None:
+    client = MagicMock()
+    client.__bool__.return_value = False
+    assert AnthropicProvider(client=client)._client is client
+
+
+# --- streaming (LLM_MEASURE_TTFT) -------------------------------------------
+
+
+def test_installed_sdk_exposes_the_streaming_api() -> None:
+    from anthropic.lib.streaming import AsyncMessageStream
+
+    assert "stream" in dir(AsyncMessages)
+    assert hasattr(AsyncMessageStream, "get_final_message")
+    assert "text_stream" in AsyncMessageStream.__annotations__
+    assert isinstance(AsyncMessageStream.request_id, property)
+
+
+class FakeStream:
+    def __init__(
+        self,
+        chunks: list[str],
+        message: Any,
+        fail_after: int | None = None,
+        delay: float = 0.0,
+        request_id: str | None = "req_stream",
+    ) -> None:
+        self._chunks = chunks
+        self._message = message
+        self._fail_after = fail_after
+        self._delay = delay
+        self.request_id = request_id
+        self.text_stream = self._text()
+
+    async def _text(self) -> Any:
+        for index, chunk in enumerate(self._chunks):
+            if self._fail_after is not None and index == self._fail_after:
+                raise anthropic.APIConnectionError(request=HTTP_REQUEST)
+            if self._delay:
+                await asyncio.sleep(self._delay)
+            yield chunk
+
+    async def get_final_message(self) -> Any:
+        return self._message
+
+    async def __aenter__(self) -> "FakeStream":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+
+def _streaming_provider(stream: FakeStream) -> Any:
+    client = MagicMock()
+    client.messages.stream = MagicMock(return_value=stream)
+    client.messages.create = AsyncMock(side_effect=AssertionError("no create"))
+    return AnthropicProvider(client=client, measure_ttft=True), client
+
+
+async def test_streaming_sets_ttft_and_matches_non_streaming_result() -> None:
+    usage = SimpleNamespace(input_tokens=12, output_tokens=30)
+    message = _message(usage=usage, request_id=None)
+    plain_provider, _ = _provider(
+        _message(usage=usage, request_id="req_stream")
+    )
+    plain = await plain_provider.generate(REQUEST)
+
+    provider, client = _streaming_provider(
+        FakeStream(["", "hel", "lo"], message)
+    )
+    result = await provider.generate(REQUEST)
+
+    assert plain.time_to_first_token_ms is None
+    assert result.time_to_first_token_ms is not None
+    assert 0 <= result.time_to_first_token_ms <= result.latency_ms
+    for field in (
+        "text",
+        "reported_model",
+        "finish_reason",
+        "provider_request_id",
+        "usage",
+        "effective_max_tokens",
+    ):
+        assert getattr(result, field) == getattr(plain, field)
+    kwargs = client.messages.stream.call_args.kwargs
+    assert kwargs["timeout"] == 60.0 and kwargs["max_tokens"]
+
+
+async def test_streaming_forwards_temperature_and_system() -> None:
+    provider, client = _streaming_provider(FakeStream(["a"], _message()))
+    await provider.generate(
+        LLMRequestSchema(
+            model="m", prompt="p", system_prompt="s", temperature=0.3
+        )
+    )
+    kwargs = client.messages.stream.call_args.kwargs
+    assert kwargs["system"] == "s"
+    assert kwargs["extra_body"] == {"temperature": 0.3}
+
+
+async def test_empty_leading_chunks_do_not_stamp_ttft() -> None:
+    provider, _ = _streaming_provider(
+        FakeStream(["", "", "x"], _message(), delay=0.02)
+    )
+    result = await provider.generate(REQUEST)
+    # Only the delay before the first non-empty chunk counts: >= 3 sleeps.
+    assert result.time_to_first_token_ms is not None
+    assert result.time_to_first_token_ms >= 50
+
+
+async def test_streaming_without_text_chunks_leaves_ttft_unknown() -> None:
+    provider, _ = _streaming_provider(FakeStream([], _message()))
+    result = await provider.generate(REQUEST)
+    assert result.text == "hello"
+    assert result.time_to_first_token_ms is None
+
+
+async def test_stream_failure_midway_is_normalized() -> None:
+    provider, _ = _streaming_provider(
+        FakeStream(["a", "b"], _message(), fail_after=1)
+    )
+    with pytest.raises(LLMProviderError) as info:
+        await provider.generate(REQUEST)
+    assert info.value.kind is LLMErrorKind.CONNECTION
+    assert info.value.retryable is True
+
+
+async def test_stream_overall_timeout_maps_to_timeout() -> None:
+    provider, _ = _streaming_provider(
+        FakeStream(["a", "b"], _message(), delay=0.5)
+    )
+    with pytest.raises(LLMProviderError) as info:
+        await provider.generate(
+            LLMRequestSchema(model="m", prompt="p", timeout_seconds=0.05)
+        )
+    assert info.value.kind is LLMErrorKind.TIMEOUT
+    assert info.value.retryable is True
+
+
+async def test_streaming_empty_completion_keeps_usage() -> None:
+    usage = SimpleNamespace(input_tokens=3, output_tokens=9)
+    message = _message(content=[], usage=usage)
+    provider, _ = _streaming_provider(FakeStream([], message))
+    with pytest.raises(LLMProviderError) as info:
+        await provider.generate(REQUEST)
+    assert info.value.kind is LLMErrorKind.MALFORMED_RESPONSE
+    assert info.value.output_tokens == 9

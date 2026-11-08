@@ -71,6 +71,11 @@ class SettingsSchema(BaseSettings):
     # Max simultaneous model requests per provider in one worker process.
     llm_max_concurrency: int = Field(default=4, ge=1)
 
+    # Stream model responses to time the first text chunk (exposed as the
+    # model_call_ttft_seconds metric). Off by default: streaming changes how
+    # errors and usage reach the adapter.
+    llm_measure_ttft: bool = False
+
     # Longest model response stored per result, marker included, in
     # characters. Longer output is cut and flagged as truncated.
     max_stored_response_chars: int = Field(

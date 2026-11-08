@@ -1,4 +1,4 @@
-import logging
+import asyncio
 import time
 from typing import Any
 
@@ -13,9 +13,14 @@ from components.third_party.llm.schemas import (
     LLMResponseSchema,
     LLMUsageSchema,
 )
-from components.third_party.llm.utils import retry_after, status_kind
+from components.third_party.llm.utils import SDKErrors, log_call, map_sdk_error
 
-logger = logging.getLogger(__name__)
+_SDK_ERRORS = SDKErrors(
+    timeout=anthropic.APITimeoutError,
+    connection=anthropic.APIConnectionError,
+    status=anthropic.APIStatusError,
+    validation=anthropic.APIResponseValidationError,
+)
 
 # The Messages API requires max_tokens, so a value must be sent when the
 # caller omitted it. This is the documented exception to "no invented
@@ -31,9 +36,15 @@ class AnthropicProvider(BaseLLMProvider):
         self,
         api_key: str | None = None,
         client: AsyncAnthropic | None = None,
+        measure_ttft: bool = False,
     ) -> None:
         # SDK retries are disabled: the platform owns the retry policy.
-        self._client = client or AsyncAnthropic(api_key=api_key, max_retries=0)
+        self._client = (
+            AsyncAnthropic(api_key=api_key, max_retries=0)
+            if client is None
+            else client
+        )
+        self._measure_ttft = measure_ttft
 
     async def generate(self, request: LLMRequestSchema) -> LLMResponseSchema:
         params: dict[str, Any] = {}
@@ -45,21 +56,29 @@ class AnthropicProvider(BaseLLMProvider):
             params["extra_body"] = {"temperature": request.temperature}
 
         max_tokens = request.max_tokens or DEFAULT_MAX_TOKENS
+        call: dict[str, Any] = {
+            "model": request.model,
+            "messages": [{"role": "user", "content": request.prompt}],
+            "max_tokens": max_tokens,
+            "timeout": request.timeout_seconds,
+            **params,
+        }
         started = time.perf_counter()
+        ttft_ms: float | None = None
+        request_id: str | None = None
         try:
-            message = await self._client.messages.create(
-                model=request.model,
-                messages=[{"role": "user", "content": request.prompt}],
-                max_tokens=max_tokens,
-                timeout=request.timeout_seconds,
-                **params,
-            )
+            if self._measure_ttft:
+                message, ttft_ms, request_id = await self._stream(
+                    request, call, started
+                )
+            else:
+                message = await self._client.messages.create(**call)
+                request_id = getattr(message, "_request_id", None)
         except Exception as exc:
-            self._log(request, "error", started)
-            raise self._map_error(exc) from exc
+            log_call(self.name, request, "error", started)
+            raise self._error(exc) from exc
         latency_ms = (time.perf_counter() - started) * 1000
 
-        request_id = getattr(message, "_request_id", None)
         blocks = getattr(message, "content", None)
         parts: list[str] = []
         if isinstance(blocks, list):
@@ -69,24 +88,21 @@ class AnthropicProvider(BaseLLMProvider):
                     if isinstance(block_text, str):
                         parts.append(block_text)
         text = "".join(parts)
+        usage = self._usage(getattr(message, "usage", None))
         if not text.strip():
-            self._log(request, "malformed_response", started)
+            log_call(self.name, request, "malformed_response", started)
             raise LLMProviderError(
                 LLMErrorKind.MALFORMED_RESPONSE,
                 self.name,
                 "response contained no text content",
                 request_id=request_id,
+                finish_reason=getattr(message, "stop_reason", None),
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                total_tokens=usage.total_tokens,
             )
 
-        # Anthropic reports no total; it stays null rather than being summed.
-        usage = LLMUsageSchema()
-        raw_usage = getattr(message, "usage", None)
-        if raw_usage is not None:
-            usage = LLMUsageSchema(
-                input_tokens=raw_usage.input_tokens,
-                output_tokens=raw_usage.output_tokens,
-            )
-        self._log(request, "success", started)
+        log_call(self.name, request, "success", started)
         return LLMResponseSchema(
             text=text,
             provider=self.name,
@@ -97,48 +113,50 @@ class AnthropicProvider(BaseLLMProvider):
             usage=usage,
             effective_max_tokens=max_tokens,
             latency_ms=latency_ms,
+            time_to_first_token_ms=ttft_ms,
         )
 
-    def _log(
-        self, request: LLMRequestSchema, outcome: str, started: float
-    ) -> None:
-        # Never log keys, prompts or responses.
-        logger.info(
-            "llm call provider=%s model=%s outcome=%s latency_ms=%.1f",
-            self.name.value,
-            request.model,
-            outcome,
-            (time.perf_counter() - started) * 1000,
-        )
+    async def _stream(
+        self, request: LLMRequestSchema, call: dict[str, Any], started: float
+    ) -> tuple[Any, float | None, str | None]:
+        """Consume the stream and stamp the first non-empty text chunk. The
+        SDK timeout is per read for streams, so the whole call is bounded
+        here. Partial text is discarded; the final message is the result."""
+        ttft_ms: float | None = None
+        async with asyncio.timeout(request.timeout_seconds):
+            async with self._client.messages.stream(**call) as stream:
+                async for chunk in stream.text_stream:
+                    if chunk and ttft_ms is None:
+                        ttft_ms = (time.perf_counter() - started) * 1000
+                message = await stream.get_final_message()
+                # The final message does not carry the request id.
+                request_id = stream.request_id
+        return message, ttft_ms, request_id
 
-    def _map_error(self, exc: Exception) -> LLMProviderError:
-        # Messages deliberately omit str(exc): SDK text may echo request data.
-        if isinstance(exc, anthropic.APITimeoutError):
+    def _error(self, exc: Exception) -> LLMProviderError:
+        if isinstance(exc, TimeoutError):  # the overall streaming bound
             return LLMProviderError(
                 LLMErrorKind.TIMEOUT, self.name, "request timed out"
             )
-        if isinstance(exc, anthropic.APIConnectionError):
-            return LLMProviderError(
-                LLMErrorKind.UNKNOWN,
-                self.name,
-                "connection error",
-                retryable=True,
-            )
-        if isinstance(exc, anthropic.APIStatusError):
-            kind = status_kind(exc.status_code)
-            return LLMProviderError(
-                kind,
-                self.name,
-                f"http status {exc.status_code}",
-                request_id=exc.request_id,
-                retry_after_seconds=retry_after(exc.response.headers),
-            )
-        if isinstance(exc, anthropic.APIResponseValidationError):
-            return LLMProviderError(
-                LLMErrorKind.MALFORMED_RESPONSE,
-                self.name,
-                "response failed validation",
-            )
-        return LLMProviderError(
-            LLMErrorKind.UNKNOWN, self.name, type(exc).__name__
+        return map_sdk_error(self.name, exc, _SDK_ERRORS)
+
+    @staticmethod
+    def _usage(raw: Any) -> LLMUsageSchema:
+        """Anthropic reports no total; it stays null rather than being
+        summed. Input tokens include cache creation and cache read tokens
+        when reported; absent or ``None`` fields count as nothing."""
+        if raw is None:
+            return LLMUsageSchema()
+        input_tokens = getattr(raw, "input_tokens", None)
+        if input_tokens is not None:
+            for field in (
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            ):
+                extra = getattr(raw, field, None)
+                if isinstance(extra, int):
+                    input_tokens += extra
+        return LLMUsageSchema(
+            input_tokens=input_tokens,
+            output_tokens=getattr(raw, "output_tokens", None),
         )

@@ -17,7 +17,10 @@ from components.experiments.models import Experiment, ExperimentResult
 from components.experiments.repository import ExperimentResultRepository
 from components.experiments.runner import ExperimentRunner
 from components.third_party.llm.enums import LLMErrorKind, ProviderName
-from components.third_party.llm.exceptions import ProviderNotConfiguredError
+from components.third_party.llm.exceptions import (
+    LLMProviderError,
+    ProviderNotConfiguredError,
+)
 from components.third_party.llm.schemas import LLMUsageSchema
 from tests.access import ROOT
 from tests.experiments.helpers import (
@@ -125,6 +128,42 @@ async def test_unknown_usage_stays_null(session_factory: Factory) -> None:
     _, result_id = await _one(session_factory, llm)
     row = await _row(session_factory, result_id)
     assert row.input_tokens == 5
+    assert row.output_tokens is None and row.total_tokens is None
+
+
+async def test_empty_completion_failure_keeps_finish_reason_and_usage(
+    session_factory: Factory,
+) -> None:
+    error = LLMProviderError(
+        LLMErrorKind.MALFORMED_RESPONSE,
+        ProviderName.OPENAI,
+        "response contained no text content",
+        finish_reason="length",
+        input_tokens=5,
+        output_tokens=256,
+        total_tokens=261,
+    )
+    _, result_id = await _one(session_factory, FakeLLM([error]))
+    row = await _row(session_factory, result_id)
+    assert row.status == ResultStatus.FAILED
+    assert row.error_kind == "malformed_response"
+    assert row.finish_reason == "length"
+    assert (row.input_tokens, row.output_tokens, row.total_tokens) == (
+        5,
+        256,
+        261,
+    )
+
+
+async def test_failure_without_usage_stores_null_tokens(
+    session_factory: Factory,
+) -> None:
+    llm = FakeLLM([provider_error(LLMErrorKind.AUTHENTICATION)])
+    _, result_id = await _one(session_factory, llm)
+    row = await _row(session_factory, result_id)
+    assert row.status == ResultStatus.FAILED
+    assert row.finish_reason is None
+    assert row.input_tokens is None
     assert row.output_tokens is None and row.total_tokens is None
 
 

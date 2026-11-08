@@ -15,6 +15,7 @@ from components.experiments.model_metrics import (
     MODEL_CALL_COST_ESTIMATE_TOTAL,
     MODEL_CALL_GENERATION_SPEED_TOKENS_PER_SECOND,
     MODEL_CALL_LATENCY_SECONDS,
+    MODEL_CALL_TTFT_SECONDS,
 )
 from components.experiments.runner import ExperimentRunner
 from components.third_party.llm.enums import ProviderName
@@ -193,3 +194,24 @@ def test_no_hostile_content_reaches_any_metric(sample_id: str) -> None:
             for sample_metric in family.samples:
                 for label_value in sample_metric.labels.values():
                     assert sample not in label_value
+
+
+def test_ttft_recorded_when_set_and_absent_when_none() -> None:
+    runner = _runner()
+    model = f"gpt-ttft-{uuid.uuid4()}"
+    before = _histogram_observations(
+        MODEL_CALL_TTFT_SECONDS, provider="openai", model=model
+    )
+    measured = _response().model_copy(update={"time_to_first_token_ms": 120.0})
+    runner._record_model_metrics(_target(model), measured)
+    after_set = _histogram_observations(
+        MODEL_CALL_TTFT_SECONDS, provider="openai", model=model
+    )
+    assert after_set == before + 1
+    runner._record_model_metrics(_target(model), _response())
+    assert (
+        _histogram_observations(
+            MODEL_CALL_TTFT_SECONDS, provider="openai", model=model
+        )
+        == after_set
+    )
