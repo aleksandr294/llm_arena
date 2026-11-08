@@ -47,6 +47,7 @@ class EvaluationRepository(BaseRepository[EvaluationResult]):
                     TestCase.input,
                     TestCase.expected_output,
                     Experiment.evaluator_config,
+                    ExperimentResult.response_truncated,
                 )
                 .join(TestCase, TestCase.id == ExperimentResult.test_case_id)
                 .join(

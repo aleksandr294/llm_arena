@@ -14,9 +14,10 @@ from components.experiments.utils import derive_final_status
 
 # A result "running" for longer than this is assumed to belong to a crashed
 # worker and may be claimed again. Must exceed max attempts (5) * timeout
-# (capped at 120 s) plus backoff (30 s cap per retry) plus time spent
-# waiting for a provider semaphore: 5 * 120 + 4 * 30 = 720 s, leaving
-# headroom up to 1800 s.
+# (capped at 120 s) plus backoff (at most 120.5 s per retry: the
+# Retry-After cap plus jitter): 5 * 120 + 4 * 120.5 = 1082 s, leaving
+# headroom up to 1800 s. The runner takes the provider slot before it
+# claims, so time spent waiting for a slot is not part of the lease.
 LEASE_SECONDS = 1800
 INSERT_BATCH_SIZE = 500
 _USE_SCOPED = "use the scoped method"
@@ -152,6 +153,21 @@ class ExperimentResultRepository(BaseRepository[ExperimentResult]):
             .offset(offset)
         )
         return result.all(), total or 0
+
+    async def get_provider(
+        self, result_id: uuid.UUID
+    ) -> tuple[str, str] | None:
+        """Read-only ``(provider, status)`` of a result, or ``None`` when it
+        does not exist. Lets the runner wait for a provider slot before it
+        claims."""
+        row = (
+            await self.session.execute(
+                select(
+                    ExperimentResult.provider, ExperimentResult.status
+                ).where(ExperimentResult.id == result_id)
+            )
+        ).first()
+        return None if row is None else (row.provider, row.status)
 
     async def status_counts(self, experiment_id: uuid.UUID) -> dict[str, int]:
         """Result count per status; statuses without results are absent."""

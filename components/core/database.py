@@ -80,6 +80,13 @@ async def commit(session: AsyncSession) -> None:
         raise first_error
 
 
+async def rollback(session: AsyncSession) -> None:
+    """Roll back and drop the pending ``on_commit`` callbacks: they belong to
+    work that is not durable."""
+    session.info.pop(_CALLBACKS_KEY, None)
+    await session.rollback()
+
+
 # What the flows that open several short sessions of their own (the runner,
 # export streaming) receive from their entry point.
 SessionScope = Callable[[], AbstractAsyncContextManager[AsyncSession]]
@@ -98,9 +105,7 @@ async def session_scope(
             yield session
             await commit(session)
         except BaseException:
-            # Pending callbacks belong to work that is not durable.
-            session.info.pop(_CALLBACKS_KEY, None)
-            await session.rollback()
+            await rollback(session)
             raise
 
 

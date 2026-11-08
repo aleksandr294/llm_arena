@@ -57,6 +57,13 @@ without results still appears with zeros and `null`s:
   rate. There is no weighting and no overall score.
 - Cost: an estimate, see below.
 
+### Per-case results
+
+`/cases` lists each case with one entry per target. Every result carries
+`response_truncated` (`true` when the platform cut the stored response at its
+size limit, otherwise `false`), whether or not `include_responses` is set. It
+also appears in the OpenAPI schema (`CaseTargetResultSchema`).
+
 ### Pricing and estimated cost
 
 No prices are shipped. Costs exist only when `PRICING_FILE` points at a JSON
@@ -102,13 +109,19 @@ any cost.
   error_kind, response_truncated` (`true` or `false`), one `eval:<evaluator id>` column per configured evaluator, and
   `response_text` when requested. Unknown values are empty cells.
 - CSV formula protection: a text cell (provider, model, status, error kind,
-  evaluator outcome, response text) starting with `=`, `+`, `-`, `@`, a tab or
-  a carriage return gets a leading single quote, so spreadsheets do not run
+  evaluator outcome, response text) starting with `=`, `+`, `-`, `@`, `|`, a tab or
+  a carriage return (also after leading whitespace) gets a leading single quote, so spreadsheets do not run
   model output as a formula. This alters those cells; use JSON when the exact
   text matters.
 - Exports work in any status; check `finished` to tell partial exports from
   final ones. The filename is `experiment-<experiment_id>.json|csv`.
+- Snapshot semantics: the JSON header (`experiment`, `status`, `finished`,
+  `comparison`) is read once when streaming starts. Rows are read in batches
+  afterwards, so while an experiment is running the rows can be newer than
+  the header; `finished` false marks such an export. Prompts (`rendered_prompt`)
+  appear in JSON only with `include_responses`.
 - Limitation: the status line is sent before the rows are read. If the
   database fails mid-export the server logs the failure (id, format and row
-  count only) and ends the stream early with status 200: truncated JSON does
-  not parse, and for CSV compare the row count with `summary.counts.total`.
+  count only) and aborts the response, so the client sees a broken transfer
+  (status 200 was already sent, but the connection ends with an error)
+  instead of a complete-looking document. Truncated JSON does not parse.

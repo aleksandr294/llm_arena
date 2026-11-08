@@ -35,3 +35,12 @@ def test_nul_bytes_are_removed_before_measuring() -> None:
 def test_runner_rejects_a_non_positive_limit() -> None:
     with pytest.raises(ValueError, match="max_response_chars"):
         ExperimentRunner(None, None, max_response_chars=0)  # type: ignore[arg-type]
+
+
+def test_lone_surrogates_are_replaced_before_measuring() -> None:
+    assert _bound_response("a\ud800b\udfffc", 100) == (
+        "a\ufffdb\ufffdc",
+        False,
+    )
+    # A valid astral character is one code point and is kept.
+    assert _bound_response("\U0001f600", 100) == ("\U0001f600", False)

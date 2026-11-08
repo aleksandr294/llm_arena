@@ -76,11 +76,32 @@ most 10 000 results (cases times targets) per experiment, `max_attempts`
   crashes: call `start` again. Duplicate delivery is safe: a result is
   claimed atomically, and one that is already finished or owned is skipped.
   A worker whose lease was reclaimed cannot overwrite the new outcome.
+- The worker takes a provider request slot (see Worker concurrency) before
+  it claims a result and keeps it through the retries, so the 1800 second
+  lease only covers the model calls and backoff, never the wait for a slot.
+  A delivery it skips is logged with the result id and the reason
+  (`finished`, `owned` or `not found`).
 - A retryable provider error (timeout, rate limit, server error) is retried
   inside the task with exponential backoff (capped at 30 seconds) up to
-  `max_attempts`; other errors fail immediately. `error_kind` and a generic
-  `error_message` are stored; provider error text, prompts and API keys are
-  never logged or stored in error fields.
+  `max_attempts`; other errors fail immediately. A provider `Retry-After` is
+  honored up to 120 seconds (jitter is added after the cap); a larger one is
+  not waited for and the result fails with `rate_limit`. Attempts are counted
+  across reclaims of the same result, so a reclaimed result never exceeds
+  `max_attempts` requests in one run (one already at the limit makes one
+  request and no retries).
+- `error_kind` and a generic `error_message` are stored; provider error
+  text, prompts and API keys are never logged or stored in error fields.
+  Kinds that the platform itself sets: `configuration` (provider not
+  configured or unsupported, or the stored provider name or configuration is
+  unusable after the claim), `interrupted` (the worker was cancelled before
+  the outcome was stored; retry it with `retry-failed`), `internal`
+  (unexpected error, or the outcome could not be stored). The other kinds are
+  the normalized provider errors (`timeout`, `rate_limit`, `authentication`,
+  `invalid_request`, `server_error`, `malformed_response`, `unknown`).
+- Provider text is made storable first: NUL bytes are dropped and unpaired
+  surrogate characters become U+FFFD. If both the outcome write and the
+  fallback failure write fail, the task fails (and is redelivered) and the
+  result stays `running` until its lease expires.
 
 ### Bounded rendered prompts
 
@@ -103,8 +124,8 @@ that the stored text, including the visible marker `\n[... response
 truncated ...]` at its end, is exactly that many characters, and the result
 reports `response_truncated: true` (also in the JSON and CSV exports). A
 response within the limit is stored unchanged with `response_truncated:
-false`. Results stored before this setting existed read `false`. The original
-length is logged, never the text. Evaluators and metrics see the stored
+false`. Results stored before this setting existed read `false`. The length
+after cleaning is logged, never the text. Evaluators and metrics see the stored
 (truncated) text.
 
 ### Worker concurrency

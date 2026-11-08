@@ -170,3 +170,21 @@ async def test_case_page_and_results(session_factory: Factory) -> None:
         assert {e.result_id for e in evals} == {r.result_id for r in results}
         empty, total_empty = await repo.case_page(uuid.uuid4(), 10, 0)
         assert empty == [] and total_empty == 0
+
+
+async def test_case_results_expose_truncation(session_factory: Factory) -> None:
+    rows = [
+        Row(1, text="cut", truncated=True),
+        Row(2, text="whole"),
+    ]
+    experiment_id = await seed(session_factory, rows)
+    async with session_factory() as session:
+        repo = MetricsRepository(session)
+        for include in (False, True):
+            results = await repo.case_results(experiment_id, [1, 2], include)
+            assert [
+                (r.case_position, r.response_truncated) for r in results
+            ] == [
+                (1, True),
+                (2, False),
+            ]
