@@ -35,6 +35,7 @@ _ENTRY_POINTS = {
     # fastadmin handlers: the panel's entry points open their own scope
     "admin/users/admin.py",
     "admin/organizations/admin.py",
+    "admin/experiments/admin.py",
 }
 _FORBIDDEN = {
     "get_settings",
