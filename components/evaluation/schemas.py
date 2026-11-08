@@ -275,3 +275,5 @@ class EvaluationInput:
     case_input: str
     expected_output: str | None
     evaluator_config: dict[str, Any]
+    # The platform cut the stored response at its size limit.
+    response_truncated: bool

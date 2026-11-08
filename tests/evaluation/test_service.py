@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from components.evaluation import evaluators
 from components.evaluation.dependencies import build_evaluation_service
@@ -427,3 +427,57 @@ async def test_no_session_open_during_the_judge_call(
         scope=tracked_scope, llm_service=llm.as_service()
     )
     assert await service.evaluate_result(ids[1]) == 1
+
+
+JSON_CONFIG: dict[str, Any] = {
+    "evaluators": [{"id": "json", "type": "json_valid"}]
+}
+
+
+async def _mark_truncated(factory: Factory, result_id: uuid.UUID) -> None:
+    async with factory() as session:
+        await session.execute(
+            text(
+                "update experiment_results set response_truncated = true, "
+                "response_text = '{\"a\": [1, 2' where id = :id"
+            ),
+            {"id": result_id},
+        )
+        await session.commit()
+
+
+async def test_truncated_response_keeps_its_verdict_and_gains_the_flag(
+    session_factory: Factory,
+) -> None:
+    ids = await _make(session_factory, config=JSON_CONFIG)
+    await _mark_truncated(session_factory, ids[1])
+    service = ScopedEvaluation(session_factory)
+    assert await service.evaluate_result(ids[1]) == 1
+    (row,) = await _rows(session_factory)
+    assert row.status == "failed"
+    assert row.details == {"reason": "invalid_json", "response_truncated": True}
+
+
+async def test_complete_response_does_not_claim_truncation(
+    session_factory: Factory,
+) -> None:
+    ids = await _make(session_factory, config=JSON_CONFIG)
+    service = ScopedEvaluation(session_factory)
+    await service.evaluate_result(ids[1])
+    (row,) = await _rows(session_factory)
+    assert "response_truncated" not in row.details
+
+
+async def test_judge_outcome_of_truncated_response_is_flagged(
+    session_factory: Factory,
+) -> None:
+    ids = await _make(session_factory, config=JUDGE_CONFIG)
+    await _mark_truncated(session_factory, ids[1])
+    llm = FakeLLM([response(text="PASS")])
+    await _judge_service(session_factory, llm).evaluate_result(ids[1])
+    (row,) = await _rows(session_factory)
+    assert row.status == "passed"
+    assert row.details == {
+        "reason": "judge_verdict",
+        "response_truncated": True,
+    }

@@ -28,3 +28,9 @@ and worker; clients must send a token from then on.
 
 Register each component's `models` module in `migrations/env.py` so
 autogenerate sees its tables. The baseline revision `0001` is empty.
+
+Revision `0009` adds the index `ix_experiment_results_export_order` on
+`experiment_results (experiment_id, case_position, provider, model, id)`
+that backs the export ordering. It changes no data. `CREATE INDEX` blocks
+writes to `experiment_results` while it runs, so migrate between experiment
+runs, then restart the API and worker. `alembic downgrade 0007` drops it.

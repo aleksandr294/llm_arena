@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.experiments import runner as runner_module
@@ -28,6 +29,12 @@ from tests.experiments.helpers import (
     provider_error,
     response,
     scope_of,
+)
+from tests.security.helpers import (
+    CORPUS,
+    MARK,
+    NUL_STRIPPED,
+    NUL_TEXT,
 )
 
 pytestmark = pytest.mark.integration
@@ -138,17 +145,49 @@ async def test_rate_limit_then_success(session_factory: Factory) -> None:
     assert len(llm.calls) == 2
 
 
-async def test_retry_after_is_capped(session_factory: Factory) -> None:
+async def test_retry_after_is_honored(session_factory: Factory) -> None:
     llm = FakeLLM(
         [
-            provider_error(LLMErrorKind.RATE_LIMIT, retry_after=120),
+            provider_error(LLMErrorKind.RATE_LIMIT, retry_after=60),
             provider_error(LLMErrorKind.TIMEOUT),
             response(),
         ]
     )
     sleeps = Sleeps()
     await _one(session_factory, llm, sleeps)
-    assert sleeps.delays == [30.0, 2.0]
+    assert sleeps.delays == [60.0, 2.0]
+
+
+async def test_retry_after_above_the_cap_fails_without_sleeping(
+    session_factory: Factory,
+) -> None:
+    llm = FakeLLM([provider_error(LLMErrorKind.RATE_LIMIT, retry_after=600)])
+    sleeps = Sleeps()
+    _, result_id = await _one(session_factory, llm, sleeps)
+    row = await _row(session_factory, result_id)
+    assert row.status == ResultStatus.FAILED
+    assert row.error_kind == "rate_limit" and row.attempts == 1
+    assert row.provider_request_id == "req-err"
+    assert sleeps.delays == [] and len(llm.calls) == 1
+
+
+async def test_jitter_applies_at_the_retry_after_cap(
+    session_factory: Factory,
+) -> None:
+    llm = FakeLLM([provider_error(LLMErrorKind.RATE_LIMIT, retry_after=120)])
+    sleeps = Sleeps()
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    runner = ExperimentRunner(
+        scope_of(session_factory),
+        llm.as_service(),
+        sleep=sleeps,
+        jitter=lambda: 0.25,
+    )
+    await runner.run(result_id)
+    assert sleeps.delays == [120.25]
 
 
 async def test_authentication_failure_is_not_retried(
@@ -361,9 +400,11 @@ async def test_concurrency_limit_is_never_exceeded(
     assert experiment.status == ExperimentStatus.COMPLETED
 
 
-async def test_backoff_does_not_hold_the_semaphore(
+async def test_backoff_holds_the_provider_slot(
     session_factory: Factory,
 ) -> None:
+    """Backpressure: a result waiting out a rate limit keeps its slot, so
+    the next result is neither claimed nor sent to the provider."""
     experiment_id = await make_experiment(session_factory, cases=2, start=True)
     ids = await _ids(session_factory, experiment_id, ResultStatus.PENDING)
     llm = FakeLLM([provider_error(LLMErrorKind.TIMEOUT)])
@@ -383,11 +424,218 @@ async def test_backoff_does_not_hold_the_semaphore(
     )
     first = asyncio.create_task(runner.run(ids[0]))
     await in_sleep.wait()
-    # The sleeping task must not block the only slot.
-    await asyncio.wait_for(runner.run(ids[1]), timeout=5)
+    second = asyncio.create_task(runner.run(ids[1]))
+    await asyncio.sleep(0.2)
+    assert not second.done()
+    assert (await _row(session_factory, ids[1])).status == "pending"
+    assert len(llm.calls) == 1
     release.set()
-    await first
+    await asyncio.gather(first, second)
     assert (await _row(session_factory, ids[0])).attempts == 2
+    assert (await _row(session_factory, ids[1])).status == "succeeded"
+
+
+async def test_waiting_results_are_not_claimed_and_keep_their_lease(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=3, start=True)
+    ids = await _ids(session_factory, experiment_id, ResultStatus.PENDING)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    llm = FakeLLM()
+
+    async def handler(prompt: str) -> Any:
+        started.set()
+        await release.wait()
+        return response()
+
+    llm.handler = handler
+    runner = _runner(session_factory, llm, max_concurrency=1)
+    tasks = [asyncio.create_task(runner.run(i)) for i in ids]
+    await started.wait()
+    await asyncio.sleep(0.2)
+    rows = [await _row(session_factory, i) for i in ids]
+    assert sorted(r.status for r in rows) == ["pending", "pending", "running"]
+    waiting = [r for r in rows if r.status == "pending"]
+    assert all(r.started_at is None and r.attempts == 0 for r in waiting)
+    assert len(llm.calls) == 1
+    release.set()
+    await asyncio.gather(*tasks)
+    rows = [await _row(session_factory, i) for i in ids]
+    assert [r.status for r in rows] == ["succeeded"] * 3
+    assert [r.attempts for r in rows] == [1, 1, 1]
+    assert len(llm.calls) == 3
+
+
+async def test_skipped_deliveries_log_the_reason(
+    session_factory: Factory, caplog: pytest.LogCaptureFixture
+) -> None:
+    llm = FakeLLM()
+    _, finished_id = await _one(session_factory, llm)
+    owned_experiment = await make_experiment(
+        session_factory, cases=1, start=True
+    )
+    (owned_id,) = await _ids(
+        session_factory, owned_experiment, ResultStatus.PENDING
+    )
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                "update experiment_results set status = 'running', "
+                "started_at = now() where id = :id"
+            ),
+            {"id": owned_id},
+        )
+        await s.commit()
+    runner = _runner(session_factory, llm)
+    with caplog.at_level("INFO"):
+        await runner.run(finished_id)
+        await runner.run(owned_id)
+        await runner.run(uuid.uuid4())
+    assert f"result {finished_id} skipped (finished)" in caplog.text
+    assert f"result {owned_id} skipped (owned)" in caplog.text
+    assert "skipped (not found)" in caplog.text
+    assert len(llm.calls) == 1
+
+
+async def test_unknown_provider_fails_the_claimed_result(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    async with session_factory() as s:
+        await s.execute(
+            text("update experiment_results set provider = 'nonesuch'")
+        )
+        await s.commit()
+    llm = FakeLLM()
+    await _runner(session_factory, llm).run(result_id)
+    row = await _row(session_factory, result_id)
+    assert row.status == ResultStatus.FAILED
+    assert row.error_kind == "configuration" and row.attempts == 1
+    assert "ValueError" in (row.error_message or "")
+    assert llm.calls == []
+    experiment = await _experiment(session_factory, experiment_id)
+    assert experiment.status == ExperimentStatus.FAILED
+
+
+async def test_invalid_stored_config_fails_the_claimed_result(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    async with session_factory() as s:
+        await s.execute(
+            text("update experiments set config = '{\"temperature\": 99}'")
+        )
+        await s.commit()
+    llm = FakeLLM()
+    await _runner(session_factory, llm).run(result_id)
+    row = await _row(session_factory, result_id)
+    assert row.status == ResultStatus.FAILED
+    assert row.error_kind == "configuration"
+    assert "ValidationError" in (row.error_message or "")
+    assert "99" not in (row.error_message or "")
+    assert llm.calls == []
+
+
+async def test_cancelled_worker_marks_the_result_interrupted(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    started = asyncio.Event()
+    llm = FakeLLM()
+
+    async def handler(prompt: str) -> Any:
+        started.set()
+        await asyncio.Event().wait()
+
+    llm.handler = handler
+    task = asyncio.create_task(_runner(session_factory, llm).run(result_id))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    row = await _row(session_factory, result_id)
+    assert row.status == ResultStatus.FAILED
+    assert row.error_kind == "interrupted" and row.attempts == 1
+    assert row.error_message == "Worker stopped before the request finished"
+    experiment = await _experiment(session_factory, experiment_id)
+    assert experiment.status == ExperimentStatus.FAILED
+    assert experiment.finished_at is not None
+    # retry-failed re-runs it like any failed result.
+    enqueued = Enqueued()
+    async with session_factory() as s:
+        service = build_experiment_service(s, FakeLLM().as_service(), enqueued)
+        assert await service.retry_failed(ROOT, experiment_id) == 1
+        await s.commit()
+    assert enqueued.flat == [result_id]
+    await _runner(session_factory, FakeLLM()).run(result_id)
+    assert (await _row(session_factory, result_id)).status == "succeeded"
+
+
+async def test_cancel_during_backoff_reports_attempts_made(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    in_sleep = asyncio.Event()
+
+    async def sleep(delay: float) -> None:
+        in_sleep.set()
+        await asyncio.Event().wait()
+
+    llm = FakeLLM([provider_error(LLMErrorKind.TIMEOUT)])
+    runner = ExperimentRunner(
+        scope_of(session_factory), llm.as_service(), sleep=sleep
+    )
+    task = asyncio.create_task(runner.run(result_id))
+    await in_sleep.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    row = await _row(session_factory, result_id)
+    assert row.error_kind == "interrupted" and row.attempts == 2
+
+
+async def test_cancel_does_not_overwrite_a_newer_claim(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+    started = asyncio.Event()
+    llm = FakeLLM()
+
+    async def handler(prompt: str) -> Any:
+        started.set()
+        await asyncio.Event().wait()
+
+    llm.handler = handler
+    task = asyncio.create_task(_runner(session_factory, llm).run(result_id))
+    await started.wait()
+    async with session_factory() as s:  # another worker took the lease over
+        await s.execute(
+            text(
+                "update experiment_results set started_at = now() "
+                "+ interval '1 minute'"
+            )
+        )
+        await s.commit()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (await _row(session_factory, result_id)).status == "running"
 
 
 async def test_cancel_with_running_result_finishes_as_cancelled(
@@ -460,33 +708,47 @@ async def test_outcome_write_error_stores_internal_failure(
     assert experiment.status == ExperimentStatus.FAILED
 
 
-async def test_reclaimed_result_keeps_full_retry_budget(
-    session_factory: Factory,
-) -> None:
-    experiment_id = await make_experiment(session_factory, cases=1, start=True)
-    (result_id,) = await _ids(
-        session_factory, experiment_id, ResultStatus.PENDING
-    )
-    async with session_factory() as s:
+async def _reclaim(
+    factory: Factory, attempts: int, llm: FakeLLM
+) -> ExperimentResult:
+    experiment_id = await make_experiment(factory, cases=1, start=True)
+    (result_id,) = await _ids(factory, experiment_id, ResultStatus.PENDING)
+    async with factory() as s:
         await s.execute(
             text(
                 "update experiment_results set status = 'running', "
-                "attempts = 3, started_at = now() - interval '1 hour'"
+                f"attempts = {attempts}, "
+                "started_at = now() - interval '1 hour'"
             )
         )
         await s.commit()
-    llm = FakeLLM(
-        [
-            provider_error(LLMErrorKind.RATE_LIMIT),
-            provider_error(LLMErrorKind.RATE_LIMIT),
-            response(),
-        ]
-    )
-    await _runner(session_factory, llm).run(result_id)
-    row = await _row(session_factory, result_id)
-    assert row.status == ResultStatus.SUCCEEDED
-    # Cumulative: 3 earlier requests + 3 in this run.
-    assert row.attempts == 6 and len(llm.calls) == 3
+    await _runner(factory, llm).run(result_id)
+    return await _row(factory, result_id)
+
+
+async def test_retry_budget_spans_reclaims(session_factory: Factory) -> None:
+    # 2 of 3 attempts used before the crash; the reclaim is the third.
+    llm = FakeLLM([provider_error(LLMErrorKind.RATE_LIMIT)] * 3)
+    row = await _reclaim(session_factory, 2, llm)
+    assert row.status == ResultStatus.FAILED
+    assert row.attempts == 3 and len(llm.calls) == 1
+
+
+async def test_result_over_budget_makes_one_request_and_no_retries(
+    session_factory: Factory,
+) -> None:
+    llm = FakeLLM([provider_error(LLMErrorKind.RATE_LIMIT)] * 3)
+    row = await _reclaim(session_factory, 3, llm)
+    assert row.status == ResultStatus.FAILED
+    assert row.attempts == 4 and len(llm.calls) == 1
+
+
+async def test_reclaimed_result_can_still_succeed(
+    session_factory: Factory,
+) -> None:
+    llm = FakeLLM([response("again")])
+    row = await _reclaim(session_factory, 2, llm)
+    assert row.status == ResultStatus.SUCCEEDED and row.attempts == 3
 
 
 class Hook:
@@ -698,3 +960,57 @@ async def test_response_is_bounded_with_marker_and_flag(
         assert row.response_text.startswith("x" * (limit - len(marker)))
     else:
         assert row.response_text == text
+
+
+@pytest.mark.parametrize(
+    "sample", [*CORPUS.values(), NUL_TEXT], ids=[*CORPUS, "nul"]
+)
+async def test_hostile_provider_text_is_stored_inert_and_never_logged(
+    session_factory: Factory,
+    caplog: pytest.LogCaptureFixture,
+    sample: str,
+) -> None:
+    with caplog.at_level("DEBUG"):
+        _, result_id = await _one(session_factory, FakeLLM([response(sample)]))
+    row = await _row(session_factory, result_id)
+    assert row.status == ResultStatus.SUCCEEDED
+    assert row.response_text == (NUL_STRIPPED if sample == NUL_TEXT else sample)
+    assert MARK not in caplog.text
+
+
+async def test_lone_surrogate_is_stored_as_replacement_character(
+    session_factory: Factory,
+) -> None:
+    reply = response("a\ud800b").model_copy(
+        update={"reported_model": "m\udc00"}
+    )
+    _, result_id = await _one(session_factory, FakeLLM([reply]))
+    row = await _row(session_factory, result_id)
+    assert row.status == ResultStatus.SUCCEEDED
+    assert row.response_text == "a\ufffdb"
+    assert row.reported_model == "m\ufffd"
+
+
+async def test_both_outcome_writes_failing_is_logged_and_raised(
+    session_factory: Factory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    experiment_id = await make_experiment(session_factory, cases=1, start=True)
+    (result_id,) = await _ids(
+        session_factory, experiment_id, ResultStatus.PENDING
+    )
+
+    async def broken(*args: Any, **kwargs: Any) -> bool:
+        raise OperationalError("insert secret-statement", {}, Exception("db"))
+
+    monkeypatch.setattr(ExperimentRunner, "_persist", broken)
+    runner = _runner(session_factory, FakeLLM([response("hostile " + MARK)]))
+    with caplog.at_level("ERROR"), pytest.raises(OperationalError):
+        await runner.run(result_id)
+    assert str(result_id) in caplog.text
+    assert "fallback write failed" in caplog.text
+    assert "OperationalError" in caplog.text
+    assert MARK not in caplog.text and "secret-statement" not in caplog.text
+    # Left running: the Taskiq failure and the lease reclaim take over.
+    assert (await _row(session_factory, result_id)).status == "running"

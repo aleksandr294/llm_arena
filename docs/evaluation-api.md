@@ -37,7 +37,11 @@ alter an existing experiment; each stored outcome also records the evaluator
 Every outcome is `passed`, `failed`, `skipped` (the check does not apply) or
 `error` (the evaluator itself raised; only the exception class name is
 stored). `details` hold a machine-readable `reason` and configured values'
-indexes or paths, never response text.
+indexes or paths, never response text. When the platform cut the stored
+response at its size limit (`response_truncated` on the result), every
+outcome computed for it also carries `"response_truncated": true` in
+`details`; the verdict itself is not changed or skipped, because a cut
+response can still pass or fail a check. Complete responses have no such key.
 
 | type | parameters (defaults) | outcomes and details |
 | --- | --- | --- |

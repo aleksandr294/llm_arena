@@ -9,7 +9,7 @@ from functools import partial
 from typing import Any
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from components.core.database import SessionScope, session_scope
@@ -23,6 +23,7 @@ from components.metrics.service import MetricsService
 from components.metrics.utils import neutralize
 from tests.access import ROOT, seed_principal
 from tests.metrics.helpers import Row, seed
+from tests.security.helpers import MARK, SAMPLE_IDS, SAMPLES
 
 pytestmark = pytest.mark.integration
 
@@ -76,10 +77,32 @@ async def _csv(
         ("plain", "plain"),
         ("", ""),
         ("a=b", "a=b"),
+        ("|cmd", "'|cmd"),
+        (" =1+1", "' =1+1"),
+        ("  +1", "'  +1"),
+        ("\n@x", "'\n@x"),
+        (" \t-1", "' \t-1"),
+        (" plain", " plain"),
+        ("   ", "   "),
+        ("a|b", "a|b"),
     ],
 )
 def test_neutralize(value: str, expected: str) -> None:
     assert neutralize(value) == expected
+
+
+@pytest.mark.parametrize("sample", SAMPLES, ids=SAMPLE_IDS)
+@pytest.mark.parametrize("lead", [" ", "  ", "\n", " \t ", "|"])
+def test_neutralize_with_hostile_corpus_behind_blanks_or_pipe(
+    sample: str, lead: str
+) -> None:
+    text = lead + sample
+    starts_formula = text.lstrip(" \t\r\n\f\v").startswith(
+        ("=", "+", "-", "@", "\t", "\r", "|")
+    ) or text.startswith(("\t", "\r"))
+    assert neutralize(text) == ("'" + text if starts_formula else text)
+    if lead == "|":
+        assert neutralize(text).startswith("'|")
 
 
 async def test_json_export_round_trips_and_spans_batches(
@@ -293,11 +316,106 @@ async def test_stream_failure_truncates_without_trailer(
         yield  # pragma: no cover
 
     monkeypatch.setattr(export, "iter_rows", boom)
-    chunks = await _collect(json_stream(_scope(session_factory), context, True))
+    chunks: list[str] = []
+
+    async def drain() -> None:
+        async for chunk in json_stream(_scope(session_factory), context, True):
+            chunks.append(chunk)
+
+    with pytest.raises(RuntimeError, match="db gone"):
+        await drain()
     text = "".join(chunks)
     assert not text.endswith("]}")
     with pytest.raises(json.JSONDecodeError):
         json.loads(text)
+
+
+@pytest.mark.parametrize("fmt", ["json", "csv"])
+async def test_failing_batch_aborts_the_stream_and_logs_no_row_content(
+    session_factory: Factory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    fmt: str,
+) -> None:
+    monkeypatch.setattr(export, "EXPORT_BATCH_SIZE", 2)
+    experiment_id = await seed(
+        session_factory, [Row(p, text=f"{MARK}{p}") for p in range(1, 6)]
+    )
+    context = await prepare_export(
+        _scope(session_factory), ROOT, experiment_id, _metrics
+    )
+    original = export._read_batch
+    calls = 0
+
+    async def second_batch_fails(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError(f"secret {MARK}")
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(export, "_read_batch", second_batch_fails)
+    stream = (json_stream if fmt == "json" else csv_stream)(
+        _scope(session_factory), context, True
+    )
+    chunks: list[str] = []
+
+    async def drain() -> None:
+        async for chunk in stream:
+            chunks.append(chunk)
+
+    with caplog.at_level("INFO"), pytest.raises(RuntimeError):
+        await drain()
+    assert MARK in "".join(chunks)  # the first batch was sent
+    assert "export failed" in caplog.text and "rows=2" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert MARK not in caplog.text and "secret" not in caplog.text
+    assert "export done" not in caplog.text
+
+
+@pytest.mark.parametrize("fmt", ["json", "csv"])
+async def test_successful_export_logs_only_counts(
+    session_factory: Factory,
+    caplog: pytest.LogCaptureFixture,
+    fmt: str,
+) -> None:
+    experiment_id = await seed(session_factory, [Row(1, text=MARK)])
+    with caplog.at_level("INFO"):
+        if fmt == "json":
+            await _json(session_factory, experiment_id)
+        else:
+            await _csv(session_factory, experiment_id, True)
+    assert f"export done experiment_id={experiment_id} format={fmt} rows=1" in (
+        caplog.text
+    )
+    assert MARK not in caplog.text
+
+
+async def test_keyset_query_uses_the_export_index_without_a_sort(
+    session_factory: Factory,
+) -> None:
+    experiment_id = await seed(
+        session_factory, [Row(p) for p in range(1, 4)], models=("m1", "m2")
+    )
+    stmt = export._batch_statement(
+        experiment_id, False, (1, "p", "m", uuid.uuid4())
+    )
+    async with session_factory() as session:
+        # Tiny tables favor a sequential scan; the question is whether the
+        # index can serve the ordering at all.
+        await session.execute(text("SET LOCAL enable_seqscan = off"))
+        await session.execute(text("SET LOCAL enable_bitmapscan = off"))
+        compiled = stmt.compile(
+            session.bind, compile_kwargs={"literal_binds": True}
+        )
+        plan = (
+            (await session.execute(text("EXPLAIN " + str(compiled))))
+            .scalars()
+            .all()
+        )
+    text_plan = "\n".join(plan)
+    assert "ix_experiment_results_export_order" in text_plan
+    assert "Sort" not in text_plan
 
 
 async def test_prepare_export_hides_out_of_scope_experiments(

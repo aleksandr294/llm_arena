@@ -36,7 +36,15 @@ def test_upgrade_defaults_existing_rows_to_false_and_downgrades(
         "AND column_name = 'response_truncated'",
     )
     assert column == [("NO", "false")]
-    assert _drift(scratch_url) == []
+    # Only the index added later by 0009 may be missing at revision 0007.
+    assert [
+        d
+        for d in _drift(scratch_url)
+        if not (
+            d[0] == "add_index"
+            and d[1].name == "ix_experiment_results_export_order"
+        )
+    ] == []
 
     command.downgrade(_config(), "0006")
     assert _run(

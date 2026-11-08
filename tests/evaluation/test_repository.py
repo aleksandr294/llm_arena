@@ -260,6 +260,7 @@ async def test_get_input_joins_case_and_experiment_config(
         assert second.experiment_id == experiment.id
         assert second.status == "succeeded"
         assert second.evaluator_config == config
+        assert second.response_truncated is False
         assert failed.status == "failed"
         assert await repo.get_input(uuid.uuid4()) is None
 

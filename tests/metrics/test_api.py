@@ -173,6 +173,38 @@ async def test_cases_pagination_and_response_rules(
     assert texts == {"one", "two", "x"}
 
 
+@pytest.mark.parametrize("include", ["false", "true"])
+async def test_cases_expose_response_truncated(
+    client: AsyncClient,
+    session_factory: Factory,
+    owner: Principal,
+    include: str,
+) -> None:
+    experiment_id = await seed(
+        session_factory,
+        [Row(1, text="cut", truncated=True), Row(2, text="whole")],
+        owner=owner,
+    )
+    body = (
+        await client.get(
+            url(experiment_id, "cases"), params={"include_responses": include}
+        )
+    ).json()
+    flags = {
+        c["case_position"]: c["results"][0]["response_truncated"]
+        for c in body["items"]
+    }
+    assert flags == {1: True, 2: False}
+
+
+def test_openapi_documents_response_truncated(app: FastAPI) -> None:
+    schema = app.openapi()
+    props = schema["components"]["schemas"]["CaseTargetResultSchema"][
+        "properties"
+    ]
+    assert props["response_truncated"]["type"] == "boolean"
+
+
 @pytest.mark.parametrize("suffix", ["summary", "comparison", "cases", "export"])
 async def test_unknown_experiment_is_404(
     client: AsyncClient, suffix: str
