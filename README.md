@@ -176,9 +176,10 @@ the database first (for the compose database from the host, use the
 | Lint | `ruff check .` |
 | Format check | `black --check .` (use `black .` to format) |
 | Types | `mypy` |
-| Static security analysis | `poetry run bandit -c pyproject.toml -r -ll components api admin cli.py main.py taskiq_app.py migrations scripts` |
+| Static security analysis | `poetry run ruff check --select S components api admin cli.py main.py taskiq_app.py migrations migrations/versions/*.py scripts` |
 | Dependency audit (needs network) | `poetry run pip-audit` |
-| Dynamic scan (OWASP ZAP) | throwaway instance only, see [Security](docs/security.md) |
+| SQL injection scan (sqlmap, runs in CI) | `scripts/ci_sqlmap.sh <reports-dir>`, throwaway instance only, see [CI](docs/ci.md) |
+| Dynamic scan (OWASP ZAP, manual) | throwaway instance only, see [Security](docs/security.md) |
 | All pre-commit hooks | `pre-commit run --all-files` |
 | Real-provider tests (opt-in, cost money) | see [Testing](docs/testing.md) |
 | Kan board helper | `scripts/kan.py`, see "Task tracking (Kan)" in `CLAUDE.md` |
@@ -390,6 +391,7 @@ Reference pages (moved out of this file; content unchanged):
 - [Interactive API documentation](docs/api-documentation.md)
 - [Migrations](docs/migrations.md)
 - [Quality checks and real-provider tests](docs/testing.md)
+- [Continuous integration (pull-request workflow)](docs/ci.md)
 - [Development agents](docs/development-agents.md)
 - [Security checks and findings register](docs/security.md)
 - [Observability: logs, metrics, Grafana](docs/observability.md)

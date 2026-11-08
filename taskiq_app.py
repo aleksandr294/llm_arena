@@ -51,7 +51,7 @@ async def _start_worker_metrics_server(_state: TaskiqState) -> None:
     # restricted to 127.0.0.1 by the Compose "ports:" mapping.
     start_http_server(
         settings.worker_metrics_port,
-        addr="0.0.0.0",  # nosec B104 - container-internal; see comment above
+        addr="0.0.0.0",  # noqa: S104 - container-internal; see comment above
         registry=WORKER_METRICS_REGISTRY,
     )
 

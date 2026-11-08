@@ -357,6 +357,11 @@ def test_admin_panel_pages_load_with_the_headers(tmp_path: Path) -> None:
         for k, v in os.environ.items()
         if not k.startswith(("ADMIN_", "DATABASE_", "RABBITMQ_"))
     }
+    # Importing ``taskiq_app`` builds the settings at import time, and these
+    # prefixes were stripped above: without placeholders the child depends on
+    # a developer's .env file and fails on a clean checkout (CI).
+    clean["DATABASE_URL"] = "postgresql+asyncpg://unused/unused"
+    clean["RABBITMQ_URL"] = "amqp://unused/"
     clean["PYTHONPATH"] = str(ROOT)
     done = subprocess.run(
         [sys.executable, "-c", code],
@@ -485,6 +490,11 @@ def test_admin_panel_policy_covers_its_sources(tmp_path: Path) -> None:
         for k, v in os.environ.items()
         if not k.startswith(("ADMIN_", "DATABASE_", "RABBITMQ_"))
     }
+    # Importing ``taskiq_app`` builds the settings at import time, and these
+    # prefixes were stripped above: without placeholders the child depends on
+    # a developer's .env file and fails on a clean checkout (CI).
+    clean["DATABASE_URL"] = "postgresql+asyncpg://unused/unused"
+    clean["RABBITMQ_URL"] = "amqp://unused/"
     clean["PYTHONPATH"] = str(ROOT)
     done = subprocess.run(
         [sys.executable, "-c", code],

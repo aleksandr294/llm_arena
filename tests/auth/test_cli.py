@@ -246,9 +246,16 @@ def test_main_still_exposes_api_command(
 
 
 def test_no_http_route_creates_users() -> None:
+    # Built without the admin panel: mounting it imports fastadmin, which
+    # fails when another test module already imported it with another key.
+    settings = SettingsSchema(
+        database_url="postgresql+asyncpg://unused/unused",
+        rabbitmq_url="amqp://unused/",
+        admin_secret_key=None,
+    )
     methods_by_path: dict[str, set[str]] = {
         getattr(r, "path", ""): getattr(r, "methods", set())
-        for r in create_app().routes
+        for r in create_app(settings).routes
     }
     for path, methods in methods_by_path.items():
         if "POST" in methods:

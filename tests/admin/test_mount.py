@@ -59,6 +59,11 @@ def _run(code: str, tmp_path: Path, **env: str) -> dict[str, object]:
         for k, v in os.environ.items()
         if not k.startswith(("ADMIN_", "DATABASE_", "RABBITMQ_"))
     }
+    # Importing ``taskiq_app`` builds the settings at import time, and these
+    # prefixes were stripped above: without placeholders the child depends on
+    # a developer's .env file and fails on a clean checkout (CI).
+    clean["DATABASE_URL"] = "postgresql+asyncpg://unused/unused"
+    clean["RABBITMQ_URL"] = "amqp://unused/"
     clean.update(env)
     clean["PYTHONPATH"] = f"{tmp_path}{os.pathsep}{ROOT}"
     done = subprocess.run(

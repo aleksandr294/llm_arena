@@ -30,7 +30,9 @@ class ValidateRequestSchema(BaseModel):
 class TokenPairSchema(BaseModel):
     access_token: str
     refresh_token: str
-    token_type: Literal["bearer"] = "bearer"
+    token_type: Literal["bearer"] = (
+        "bearer"  # noqa: S105 - OAuth token type name, not a password
+    )
     expires_in: int
 
 
