@@ -137,6 +137,7 @@ def test_mount_with_secret_configures_fastadmin_before_import(
         app = create_app(settings(
             admin_secret_key={ADMIN_SECRET!r},
             admin_session_cookie_secure=False,
+            api_docs_enabled=True,
         ))
         import probe_admin_module as probe
         index = asyncio.run(get(app, "/admin/"))
@@ -172,6 +173,23 @@ def test_cookie_secure_defaults_to_true(tmp_path: Path) -> None:
         tmp_path,
     )
     assert result == {"secure": True}
+
+
+def test_fastadmin_cookie_name_matches_the_middleware(
+    tmp_path: Path,
+) -> None:
+    """The middleware's ``no-store`` rule keys on this cookie name."""
+    from api.middleware import ADMIN_SESSION_COOKIE
+
+    result = _run(
+        f"""
+        create_app(settings(admin_secret_key={ADMIN_SECRET!r}))
+        import fastadmin.settings as fs
+        print(json.dumps({{"name": fs.settings.ADMIN_SESSION_ID_KEY}}))
+        """,
+        tmp_path,
+    )
+    assert result == {"name": ADMIN_SESSION_COOKIE}
 
 
 def test_second_mount_reuses_the_single_fastadmin_import(

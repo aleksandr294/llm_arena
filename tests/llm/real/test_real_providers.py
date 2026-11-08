@@ -42,8 +42,8 @@ async def test_real_roundtrip(
     if not os.environ.get(key_var, "").strip():
         pytest.skip(f"{key_var} is not set")
     settings = SettingsSchema(
-        database_url="unused",
-        rabbitmq_url="unused",
+        database_url="postgresql+asyncpg://unused",
+        rabbitmq_url="amqp://unused",
     )
     target = ModelTargetSchema(
         provider=provider, model=os.environ.get(model_var, default_model)

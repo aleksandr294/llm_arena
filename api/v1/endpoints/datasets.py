@@ -1,19 +1,27 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.v1.docs import errors
 from api.v1.utils import (
     CreatedRangeSchema,
+    Limit,
+    Offset,
     SessionDep,
     get_created_range,
     get_principal,
+    get_settings_dependency,
+    not_found,
 )
+from components.core.config import SettingsSchema
 from components.core.exceptions import OrganizationRequiredError
 from components.core.schemas import Principal
 from components.datasets.dependencies import build_dataset_service
-from components.datasets.exceptions import DatasetNotFoundError
+from components.datasets.exceptions import (
+    DatasetFullError,
+    DatasetNotFoundError,
+)
 from components.datasets.schemas import (
     DatasetCreateSchema,
     DatasetDetailSchema,
@@ -27,20 +35,16 @@ from components.datasets.service import DatasetService
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
-Limit = Annotated[int, Query(ge=1, le=100)]
-Offset = Annotated[int, Query(ge=0)]
 
-
-def get_dataset_service(session: SessionDep) -> DatasetService:
-    return build_dataset_service(session)
+def get_dataset_service(
+    session: SessionDep,
+    settings: Annotated[SettingsSchema, Depends(get_settings_dependency)],
+) -> DatasetService:
+    return build_dataset_service(session, settings)
 
 
 ServiceDep = Annotated[DatasetService, Depends(get_dataset_service)]
 PrincipalDep = Annotated[Principal, Depends(get_principal)]
-
-
-def _not_found() -> HTTPException:
-    return HTTPException(status.HTTP_404_NOT_FOUND, "Dataset not found")
 
 
 @router.post(
@@ -102,7 +106,7 @@ async def get_dataset(
     try:
         dataset, case_count = await service.get_dataset(principal, dataset_id)
     except DatasetNotFoundError:
-        raise _not_found() from None
+        raise not_found("Dataset not found") from None
     return DatasetDetailSchema(
         **DatasetSchema.model_validate(dataset).model_dump(),
         case_count=case_count,
@@ -114,7 +118,7 @@ async def get_dataset(
     status_code=status.HTTP_201_CREATED,
     response_model=TestCaseSchema,
     summary="Add a test case",
-    responses=errors(401, 404),
+    responses=errors(401, 404, 409),
 )
 async def add_case(
     dataset_id: uuid.UUID,
@@ -125,7 +129,9 @@ async def add_case(
     try:
         case = await service.add_case(principal, dataset_id, body)
     except DatasetNotFoundError:
-        raise _not_found() from None
+        raise not_found("Dataset not found") from None
+    except DatasetFullError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
     return TestCaseSchema.model_validate(case)
 
 
@@ -147,7 +153,7 @@ async def list_cases(
             principal, dataset_id, limit, offset
         )
     except DatasetNotFoundError:
-        raise _not_found() from None
+        raise not_found("Dataset not found") from None
     return TestCasePageSchema(
         items=[TestCaseSchema.model_validate(i) for i in items],
         total=total,

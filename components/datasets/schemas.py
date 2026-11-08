@@ -11,7 +11,11 @@ from pydantic import (
     StringConstraints,
 )
 
-from components.core.utils import reject_nul, reject_nul_deep
+from components.core.utils import (
+    reject_nul,
+    reject_nul_deep,
+    validate_metadata_bounds,
+)
 
 NAME_MAX = 255
 DESCRIPTION_MAX = 2000
@@ -37,7 +41,12 @@ InputStr = Annotated[
 OutputStr = Annotated[
     str, StringConstraints(max_length=TEXT_MAX), AfterValidator(reject_nul)
 ]
-MetadataDict = Annotated[dict[str, Any], AfterValidator(reject_nul_deep)]
+# Bounds first: they reject deep nesting before ``reject_nul_deep`` recurses.
+MetadataDict = Annotated[
+    dict[str, Any],
+    AfterValidator(validate_metadata_bounds),
+    AfterValidator(reject_nul_deep),
+]
 
 
 class DatasetCreateSchema(BaseModel):

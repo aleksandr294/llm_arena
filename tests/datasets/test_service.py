@@ -2,21 +2,39 @@
 
 import asyncio
 import uuid
+from typing import Any
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from components.core.config import SettingsSchema
 from components.core.exceptions import OrganizationRequiredError
 from components.core.schemas import Principal
 from components.datasets.dependencies import build_dataset_service
-from components.datasets.exceptions import DatasetNotFoundError
+from components.datasets.exceptions import (
+    DatasetFullError,
+    DatasetNotFoundError,
+)
 from components.datasets.schemas import (
     DatasetCreateSchema,
     TestCaseCreateSchema,
 )
+from components.datasets.service import DatasetService
+from conftest import TEST_JWT_SECRET
 from tests.access import Actors
 
 pytestmark = pytest.mark.integration
+
+
+def _service(session: AsyncSession, **overrides: Any) -> DatasetService:
+    settings = SettingsSchema(
+        _env_file=None,
+        database_url="postgresql+asyncpg://unused/unused",
+        rabbitmq_url="amqp://unused/",
+        jwt_secret_key=TEST_JWT_SECRET,
+        **overrides,
+    )
+    return build_dataset_service(session, settings)
 
 
 async def _new_dataset(
@@ -24,7 +42,7 @@ async def _new_dataset(
     principal: Principal,
 ) -> uuid.UUID:
     async with factory() as session:
-        dataset = await build_dataset_service(session).create_dataset(
+        dataset = await _service(session).create_dataset(
             principal, DatasetCreateSchema(name="d")
         )
         await session.commit()
@@ -39,7 +57,7 @@ async def test_positions_start_at_one_and_increment(
         session_factory, actors.principal("staff_a")
     )
     async with session_factory() as session:
-        service = build_dataset_service(session)
+        service = _service(session)
         me = actors.principal("staff_a")
         first = await service.add_case(
             me, dataset_id, TestCaseCreateSchema(input="a")
@@ -58,7 +76,7 @@ async def test_unknown_dataset(
 ) -> None:
     missing = uuid.uuid4()
     async with session_factory() as session:
-        service = build_dataset_service(session)
+        service = _service(session)
         me = actors.principal("staff_a")
         with pytest.raises(DatasetNotFoundError):
             await service.get_dataset(me, missing)
@@ -76,7 +94,7 @@ async def test_get_dataset_counts_cases(
         session_factory, actors.principal("staff_a")
     )
     async with session_factory() as session:
-        service = build_dataset_service(session)
+        service = _service(session)
         me = actors.principal("staff_a")
         for text in ("a", "b"):
             await service.add_case(
@@ -96,7 +114,7 @@ async def test_content_round_trip(
     text = 'He said "hi"\nline 2\t\\ é中文 \U0001f600 '
     meta = {"k": text, "n": [1, {"x": None}]}
     async with session_factory() as session:
-        service = build_dataset_service(session)
+        service = _service(session)
         me = actors.principal("staff_a")
         await service.add_case(
             me,
@@ -107,7 +125,7 @@ async def test_content_round_trip(
         )
         await session.commit()
     async with session_factory() as session:
-        cases, total = await build_dataset_service(session).list_cases(
+        cases, total = await _service(session).list_cases(
             actors.principal("staff_a"), dataset_id, 10, 0
         )
     assert total == 1
@@ -127,7 +145,7 @@ async def test_concurrent_adds_get_unique_gap_free_positions(
 
     async def add(i: int) -> int:
         async with session_factory() as session:
-            case = await build_dataset_service(session).add_case(
+            case = await _service(session).add_case(
                 actors.principal("staff_a"),
                 dataset_id,
                 TestCaseCreateSchema(input=f"c{i}"),
@@ -139,7 +157,7 @@ async def test_concurrent_adds_get_unique_gap_free_positions(
 
     assert sorted(positions) == list(range(1, n + 1))
     async with session_factory() as session:
-        cases, total = await build_dataset_service(session).list_cases(
+        cases, total = await _service(session).list_cases(
             actors.principal("staff_a"), dataset_id, 100, 0
         )
     assert total == n
@@ -151,13 +169,13 @@ async def test_create_records_owner_and_organization(
     actors: Actors,
 ) -> None:
     async with session_factory() as session:
-        dataset = await build_dataset_service(session).create_dataset(
+        dataset = await _service(session).create_dataset(
             actors.principal("staff_a"), DatasetCreateSchema(name="d")
         )
     assert dataset.owner_id == actors["staff_a"].user_id
     assert dataset.organization_id == actors.org_id
     async with session_factory() as session:
-        admin_made = await build_dataset_service(session).create_dataset(
+        admin_made = await _service(session).create_dataset(
             actors.principal("admin_other"), DatasetCreateSchema(name="d")
         )
     assert admin_made.owner_id == actors["admin_other"].user_id
@@ -170,7 +188,7 @@ async def test_superadmin_cannot_create(
 ) -> None:
     async with session_factory() as session:
         with pytest.raises(OrganizationRequiredError):
-            await build_dataset_service(session).create_dataset(
+            await _service(session).create_dataset(
                 actors.principal("superadmin"), DatasetCreateSchema(name="d")
             )
 
@@ -183,7 +201,7 @@ async def test_out_of_scope_equals_missing(
         session_factory, actors.principal("staff_a")
     )
     async with session_factory() as session:
-        service = build_dataset_service(session)
+        service = _service(session)
         for name in ("staff_b", "admin_other"):
             who = actors.principal(name)
             with pytest.raises(DatasetNotFoundError):
@@ -200,3 +218,56 @@ async def test_out_of_scope_equals_missing(
                 actors.principal(name), dataset_id
             )
             assert dataset.id == dataset_id
+
+
+async def test_add_case_at_the_limit_is_refused_and_stores_nothing(
+    session_factory: async_sessionmaker,  # type: ignore[type-arg]
+    actors: Actors,
+) -> None:
+    staff = actors.principal("staff_a")
+    dataset_id = await _new_dataset(session_factory, staff)
+    async with session_factory() as session:
+        service = _service(session, max_cases_per_dataset=2)
+        for i in range(2):
+            await service.add_case(
+                staff, dataset_id, TestCaseCreateSchema(input=f"c{i}")
+            )
+        await session.commit()
+    async with session_factory() as session:
+        service = _service(session, max_cases_per_dataset=2)
+        with pytest.raises(DatasetFullError):
+            await service.add_case(
+                staff, dataset_id, TestCaseCreateSchema(input="over")
+            )
+        await session.rollback()
+    async with session_factory() as session:
+        _, total = await _service(session).list_cases(staff, dataset_id, 100, 0)
+    assert total == 2
+
+
+async def test_concurrent_adds_one_short_of_the_limit_admit_one(
+    session_factory: async_sessionmaker,  # type: ignore[type-arg]
+    actors: Actors,
+) -> None:
+    staff = actors.principal("staff_a")
+    dataset_id = await _new_dataset(session_factory, staff)
+    async with session_factory() as session:
+        await _service(session, max_cases_per_dataset=3).add_case(
+            staff, dataset_id, TestCaseCreateSchema(input="first")
+        )
+        await session.commit()
+
+    async def add(i: int) -> bool:
+        async with session_factory() as session:
+            try:
+                await _service(session, max_cases_per_dataset=2).add_case(
+                    staff, dataset_id, TestCaseCreateSchema(input=f"c{i}")
+                )
+            except DatasetFullError:
+                await session.rollback()
+                return False
+            await session.commit()
+            return True
+
+    results = await asyncio.gather(add(1), add(2))
+    assert sorted(results) == [False, True]

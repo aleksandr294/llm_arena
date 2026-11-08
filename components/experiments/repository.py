@@ -26,7 +26,7 @@ class ExperimentRepository(BaseRepository[Experiment]):
     """Scoped methods take a ``Principal`` and treat out-of-scope rows as
     missing. The ``*_unscoped`` methods are for workers and the runner,
     which have no user context; request handlers must not call them. The
-    inherited unscoped ``get``/``delete``/``list`` are disabled."""
+    inherited unscoped ``get``/``delete`` are disabled."""
 
     model = Experiment
 
@@ -34,11 +34,6 @@ class ExperimentRepository(BaseRepository[Experiment]):
         raise NotImplementedError(_USE_SCOPED)
 
     async def delete(self, entity: Experiment) -> None:
-        raise NotImplementedError(_USE_SCOPED)
-
-    async def list(
-        self, limit: int = 100, offset: int = 0
-    ) -> Sequence[Experiment]:
         raise NotImplementedError(_USE_SCOPED)
 
     async def list_page(

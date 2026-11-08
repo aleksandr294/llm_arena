@@ -12,6 +12,23 @@ JWT_SECRET_MIN_LENGTH: Final = 32
 ADMIN_SECRET_MIN_LENGTH: Final = 32
 DEFAULT_MAX_STORED_RESPONSE_CHARS: Final = 1_000_000
 DEFAULT_MAX_REQUEST_BODY_BYTES: Final = 2 * 1024 * 1024
+DEFAULT_MAX_CASES_PER_DATASET: Final = 10_000
+JWT_ACCESS_TTL_MAX_SECONDS: Final = 86_400
+JWT_REFRESH_TTL_MAX_SECONDS: Final = 7_776_000
+# Catches obviously weak secrets (one repeated character, short cycles); it
+# is not an entropy estimate.
+SECRET_MIN_DISTINCT_CHARS: Final = 12
+DATABASE_URL_PREFIX: Final = "postgresql+asyncpg://"
+RABBITMQ_URL_PREFIXES: Final = ("amqp://", "amqps://")
+
+
+def _require_entropy(value: str, name: str) -> None:
+    # Messages name the setting but never echo the value.
+    if len(set(value)) < SECRET_MIN_DISTINCT_CHARS:
+        raise ValueError(
+            f"{name} must contain at least {SECRET_MIN_DISTINCT_CHARS} "
+            "distinct characters"
+        )
 
 
 class SettingsSchema(BaseSettings):
@@ -28,7 +45,7 @@ class SettingsSchema(BaseSettings):
     # Loopback by default; containers set API_HOST=0.0.0.0 explicitly.
     api_host: str = "127.0.0.1"
     api_port: int = 8000
-    health_check_timeout_seconds: float = 2.0
+    health_check_timeout_seconds: float = Field(default=2.0, gt=0)
     # Passed to the root logger; the handler is JSON regardless of level.
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     # Serves task and model-call metrics in the worker process; bound to
@@ -40,8 +57,12 @@ class SettingsSchema(BaseSettings):
 
     # Signs JWTs (HS256). Required; rotating it invalidates all sessions.
     jwt_secret_key: SecretStr
-    jwt_access_ttl_seconds: int = Field(default=900, ge=1)
-    jwt_refresh_ttl_seconds: int = Field(default=604800, ge=1)
+    jwt_access_ttl_seconds: int = Field(
+        default=900, ge=1, le=JWT_ACCESS_TTL_MAX_SECONDS
+    )
+    jwt_refresh_ttl_seconds: int = Field(
+        default=604800, ge=1, le=JWT_REFRESH_TTL_MAX_SECONDS
+    )
     jwt_issuer: str = Field(default="llm-arena", min_length=1)
 
     # Admin panel (fastadmin). Blank means unset and the panel is not
@@ -53,8 +74,14 @@ class SettingsSchema(BaseSettings):
     # cookie; the signed value itself stays valid until this expires.
     admin_session_ttl_seconds: int = Field(default=28800, ge=60)
 
-    # Serves Swagger UI, ReDoc and the OpenAPI schema when true.
-    api_docs_enabled: bool = True
+    # Serves Swagger UI, ReDoc and the OpenAPI schema when true; off unless
+    # explicitly enabled.
+    api_docs_enabled: bool = False
+
+    # Most test cases one dataset may hold; adding more answers 409.
+    max_cases_per_dataset: int = Field(
+        default=DEFAULT_MAX_CASES_PER_DATASET, ge=1
+    )
 
     # Requests with a larger body are answered 413 before it is read in
     # full (declared and chunked bodies alike).
@@ -95,6 +122,23 @@ class SettingsSchema(BaseSettings):
             raise ValueError(
                 "jwt_secret_key must not be the .env.example placeholder"
             )
+        _require_entropy(secret, "jwt_secret_key")
+        return value
+
+    @field_validator("database_url")
+    @classmethod
+    def _database_url_uses_asyncpg(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value().startswith(DATABASE_URL_PREFIX):
+            raise ValueError(
+                f"database_url must start with {DATABASE_URL_PREFIX}"
+            )
+        return value
+
+    @field_validator("rabbitmq_url")
+    @classmethod
+    def _rabbitmq_url_is_amqp(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value().startswith(RABBITMQ_URL_PREFIXES):
+            raise ValueError("rabbitmq_url must start with amqp:// or amqps://")
         return value
 
     @field_validator("admin_secret_key", mode="before")
@@ -110,13 +154,15 @@ class SettingsSchema(BaseSettings):
         cls, value: SecretStr | None
     ) -> SecretStr | None:
         # Messages name the setting but never echo the value.
-        if value is not None and (
-            len(value.get_secret_value()) < ADMIN_SECRET_MIN_LENGTH
-        ):
+        if value is None:
+            return None
+        secret = value.get_secret_value()
+        if len(secret) < ADMIN_SECRET_MIN_LENGTH:
             raise ValueError(
                 f"admin_secret_key must be at least {ADMIN_SECRET_MIN_LENGTH} "
                 "characters"
             )
+        _require_entropy(secret, "admin_secret_key")
         return value
 
     @model_validator(mode="after")

@@ -6,7 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.core.access import require_organization
 from components.core.schemas import Principal
-from components.datasets.exceptions import DatasetNotFoundError
+from components.datasets.exceptions import (
+    DatasetFullError,
+    DatasetNotFoundError,
+)
 from components.datasets.models import Dataset, TestCase
 from components.datasets.repository import (
     DatasetRepository,
@@ -24,7 +27,8 @@ class DatasetService:
     takes the calling ``Principal``; datasets outside its scope are reported
     as not found. Content fields are deliberately never logged."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, max_cases: int) -> None:
+        self.max_cases = max_cases
         self.datasets = DatasetRepository(session)
         self.cases = TestCaseRepository(session)
 
@@ -75,6 +79,9 @@ class DatasetService:
         # The row lock serializes concurrent adds so next_position is safe.
         if await self.datasets.get_for_update(dataset_id, principal) is None:
             raise DatasetNotFoundError(dataset_id)
+        # Counted under the row lock, so concurrent adds cannot overshoot.
+        if await self.cases.count(dataset_id) >= self.max_cases:
+            raise DatasetFullError(dataset_id, self.max_cases)
         case = TestCase(
             dataset_id=dataset_id,
             position=await self.cases.next_position(dataset_id),

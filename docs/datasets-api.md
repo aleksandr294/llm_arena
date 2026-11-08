@@ -18,7 +18,7 @@ curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8000/api/v1/datasets \
     -H 'Content-Type: application/json' \
     -d '{"name": "Capitals", "description": "Geography smoke test"}'
 
-# list (limit 1-100, default 50; offset >= 0) and get (includes case_count)
+# list (limit 1-100, default 50; offset 0-1000000) and get (includes case_count)
 curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/datasets?limit=10&offset=0'
 curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/datasets/<dataset_id>
 
@@ -34,3 +34,13 @@ curl -H "Authorization: Bearer $TOKEN" 'localhost:8000/api/v1/datasets/<dataset_
 
 List responses have the form `{items, total, limit, offset}`. Invalid input
 returns 422 naming the field; an unknown dataset returns 404.
+
+## Limits
+
+- A dataset holds at most `MAX_CASES_PER_DATASET` test cases (default
+  10000). Adding one more returns 409 and stores nothing.
+- Case `metadata` is rejected with 422 (naming `metadata`) when it is nested
+  deeper than 5 levels (the object itself is level 1; lists count), has more
+  than 100 keys in total, or exceeds 16384 characters serialized as JSON.
+  The constants are `METADATA_MAX_DEPTH`, `METADATA_MAX_KEYS` and
+  `METADATA_MAX_BYTES` in `components/core/utils.py`.
