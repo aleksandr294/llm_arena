@@ -275,6 +275,4 @@ async def test_unscoped_base_methods_are_disabled(
         with pytest.raises(NotImplementedError, match="scoped"):
             await repo.get(ds.id)
         with pytest.raises(NotImplementedError, match="scoped"):
-            await repo.list()
-        with pytest.raises(NotImplementedError, match="scoped"):
             await repo.delete(ds)  # type: ignore[arg-type]

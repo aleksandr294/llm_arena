@@ -46,6 +46,9 @@ class AnthropicProvider(BaseLLMProvider):
         )
         self._measure_ttft = measure_ttft
 
+    async def aclose(self) -> None:
+        await self._client.close()
+
     async def generate(self, request: LLMRequestSchema) -> LLMResponseSchema:
         params: dict[str, Any] = {}
         if request.system_prompt:

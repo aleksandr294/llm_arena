@@ -60,6 +60,9 @@ class OpenAIProvider(BaseLLMProvider):
         )
         self._measure_ttft = measure_ttft
 
+    async def aclose(self) -> None:
+        await self._client.close()
+
     async def generate(self, request: LLMRequestSchema) -> LLMResponseSchema:
         messages: list[dict[str, str]] = []
         if request.system_prompt:

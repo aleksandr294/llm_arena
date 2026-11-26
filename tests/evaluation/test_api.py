@@ -163,6 +163,8 @@ async def test_unknown_experiment_is_404(
         "limit=101",
         "limit=x",
         "offset=-1",
+        "offset=1000001",
+        f"evaluator_id={'x' * 65}",
         "status=bogus",
         "status=PASSED",
     ],

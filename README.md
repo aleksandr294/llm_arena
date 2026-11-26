@@ -323,8 +323,8 @@ Known limits:
 - There is no login rate limiting (REST or admin panel); limit
   `/api/v1/auth/login` and `/admin/api/sign-in` at a proxy if the API is
   exposed.
-- Swagger UI and ReDoc load assets from a CDN; set `API_DOCS_ENABLED=false`
-  for production exposure.
+- Swagger UI and ReDoc are off by default (`API_DOCS_ENABLED=true` enables
+  them; `.env.example` does) and load assets from a CDN.
 
 ### Configuration and secrets
 

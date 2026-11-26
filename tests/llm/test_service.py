@@ -10,6 +10,7 @@ from components.third_party.llm.exceptions import (
     ProviderNotConfiguredError,
     UnsupportedProviderError,
 )
+from components.third_party.llm.providers.base import BaseLLMProvider
 from components.third_party.llm.schemas import (
     LLMResponseSchema,
     ModelTargetSchema,
@@ -19,7 +20,7 @@ from components.third_party.llm.service import LLMService
 
 def _settings(**overrides: Any) -> SettingsSchema:
     values: dict[str, Any] = {
-        "database_url": "postgresql://x",
+        "database_url": "postgresql+asyncpg://x",
         "rabbitmq_url": "amqp://x",
         "openai_api_key": "sk-openai",
         "anthropic_api_key": "sk-anthropic",
@@ -273,3 +274,30 @@ def test_measure_ttft_setting_reaches_both_adapters(flag: bool) -> None:
     for name in (ProviderName.OPENAI, ProviderName.ANTHROPIC):
         service.ensure_provider_ready(name)
         assert service._providers[name]._measure_ttft is flag  # type: ignore[attr-defined]
+
+
+async def test_aclose_closes_the_created_adapters_only() -> None:
+    closed: list[str] = []
+
+    class Closable(BaseLLMProvider):
+        def __init__(self, key: str) -> None:
+            self.key = key
+
+        async def generate(self, request: Any) -> LLMResponseSchema:
+            raise NotImplementedError
+
+        async def aclose(self) -> None:
+            closed.append(self.key)
+
+    service = LLMService(
+        _settings(),
+        {
+            ProviderName.OPENAI: ("openai_api_key", Closable),
+            ProviderName.ANTHROPIC: ("anthropic_api_key", Closable),
+        },
+    )
+    service.ensure_provider_ready(ProviderName.OPENAI)
+    await service.aclose()
+    assert closed == ["sk-openai"]
+    await service.aclose()
+    assert closed == ["sk-openai"]
