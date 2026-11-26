@@ -268,6 +268,14 @@ def test_adapter_is_cached_per_instance_not_across_instances() -> None:
     )
 
 
+@pytest.mark.parametrize("flag", [False, True])
+def test_measure_ttft_setting_reaches_both_adapters(flag: bool) -> None:
+    service = LLMService(_settings(llm_measure_ttft=flag))
+    for name in (ProviderName.OPENAI, ProviderName.ANTHROPIC):
+        service.ensure_provider_ready(name)
+        assert service._providers[name]._measure_ttft is flag  # type: ignore[attr-defined]
+
+
 async def test_aclose_closes_the_created_adapters_only() -> None:
     closed: list[str] = []
 

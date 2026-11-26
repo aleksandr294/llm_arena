@@ -22,15 +22,19 @@ ProviderFactory = tuple[str, Callable[[str], BaseLLMProvider]]
 ProviderFactories = Mapping[ProviderName, ProviderFactory]
 
 
-def default_provider_factories() -> ProviderFactories:
+def default_provider_factories(
+    measure_ttft: bool = False,
+) -> ProviderFactories:
     return {
         ProviderName.OPENAI: (
             "openai_api_key",
-            lambda key: OpenAIProvider(api_key=key),
+            lambda key: OpenAIProvider(api_key=key, measure_ttft=measure_ttft),
         ),
         ProviderName.ANTHROPIC: (
             "anthropic_api_key",
-            lambda key: AnthropicProvider(api_key=key),
+            lambda key: AnthropicProvider(
+                api_key=key, measure_ttft=measure_ttft
+            ),
         ),
     }
 
@@ -47,7 +51,7 @@ class LLMService:
     ) -> None:
         self._settings = settings
         self._factories = (
-            default_provider_factories()
+            default_provider_factories(measure_ttft=settings.llm_measure_ttft)
             if provider_factories is None
             else provider_factories
         )

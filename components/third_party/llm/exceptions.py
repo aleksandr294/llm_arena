@@ -5,6 +5,7 @@ RETRYABLE_KINDS: frozenset[LLMErrorKind] = frozenset(
         LLMErrorKind.TIMEOUT,
         LLMErrorKind.RATE_LIMIT,
         LLMErrorKind.SERVER_ERROR,
+        LLMErrorKind.CONNECTION,
     }
 )
 
@@ -22,6 +23,10 @@ class LLMProviderError(Exception):
         retryable: bool | None = None,
         request_id: str | None = None,
         retry_after_seconds: float | None = None,
+        finish_reason: str | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        total_tokens: int | None = None,
     ) -> None:
         self.kind = kind
         self.provider = provider
@@ -30,6 +35,13 @@ class LLMProviderError(Exception):
         )
         self.request_id = request_id
         self.retry_after_seconds = retry_after_seconds
+        # Kept for an empty completion so the runner can store them.
+        self.finish_reason = finish_reason
+        # Plain ints, not LLMUsageSchema: exceptions.py is a leaf module and
+        # must not import schemas.py. None means the provider reported none.
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.total_tokens = total_tokens
         text = message or kind.value
         super().__init__(f"{provider.value}: {kind.value}: {text}")
 
@@ -46,5 +58,5 @@ class ProviderNotConfiguredError(Exception):
         self.provider = provider
         self.setting = setting
         super().__init__(
-            f"Provider '{provider.value}' is not configured: " f"set {setting}"
+            f"Provider '{provider.value}' is not configured: set {setting}"
         )

@@ -76,9 +76,14 @@ most 10 000 results (cases times targets) per experiment, `max_attempts`
   crashes: call `start` again. Duplicate delivery is safe: a result is
   claimed atomically, and one that is already finished or owned is skipped.
   A worker whose lease was reclaimed cannot overwrite the new outcome.
-- A retryable provider error (timeout, rate limit, server error) is retried
-  inside the task with exponential backoff (capped at 30 seconds) up to
-  `max_attempts`; other errors fail immediately. `error_kind` and a generic
+- A retryable provider error (`timeout`, `rate_limit`, `server_error`,
+  `connection`) is retried inside the task with exponential backoff (capped
+  at 30 seconds) up to `max_attempts`; other errors (`authentication`,
+  `invalid_request`, `malformed_response`, `unknown`) fail immediately. Rows
+  stored before `connection` existed keep `unknown` for network failures. A
+  `malformed_response` for an empty completion keeps the provider's finish
+  reason and token usage when reported (a reasoning model that runs out of
+  tokens shows `length` and its counts). `error_kind` and a generic
   `error_message` are stored; provider error text, prompts and API keys are
   never logged or stored in error fields.
 

@@ -46,3 +46,6 @@ class LLMResponseSchema(BaseModel):
     effective_max_tokens: int | None = None
     # Measured by the platform around the SDK call.
     latency_ms: float = Field(ge=0)
+    # Elapsed time to the first non-empty text chunk; only set when the
+    # adapter streams (LLM_MEASURE_TTFT). Same clock as latency_ms.
+    time_to_first_token_ms: float | None = Field(default=None, ge=0)

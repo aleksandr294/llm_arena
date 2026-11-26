@@ -13,4 +13,5 @@ class LLMErrorKind(StrEnum):
     INVALID_REQUEST = "invalid_request"
     SERVER_ERROR = "server_error"
     MALFORMED_RESPONSE = "malformed_response"
+    CONNECTION = "connection"
     UNKNOWN = "unknown"
