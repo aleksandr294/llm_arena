@@ -1,3 +1,4 @@
+import logging
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
@@ -16,6 +17,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from components.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -43,6 +46,13 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(get_engine(), expire_on_commit=False)
 
 
+async def dispose_engine() -> None:
+    """Close the pooled connections of the engine, if one was ever built
+    (never builds one, which would also read the settings)."""
+    if get_engine.cache_info().currsize:
+        await get_engine().dispose()
+
+
 _CALLBACKS_KEY = "on_commit_callbacks"
 
 CommitCallback = Callable[[], Awaitable[None]]
@@ -64,10 +74,17 @@ async def commit(session: AsyncSession) -> None:
     """Commit, then run the ``on_commit`` callbacks in registration order.
 
     Callbacks run after the commit, so a failing one never undoes it. Every
-    callback is attempted; the first exception is raised afterwards. Each
-    callback runs at most once, even if ``commit`` is called again.
+    callback is attempted; the first exception is raised afterwards and the
+    others are logged by exception class only (their messages may carry
+    content). If the commit itself fails the callbacks are discarded, so they
+    cannot run after a later successful commit. Each callback runs at most
+    once, even if ``commit`` is called again.
     """
-    await session.commit()
+    try:
+        await session.commit()
+    except BaseException:
+        session.info.pop(_CALLBACKS_KEY, None)
+        raise
     callbacks: list[CommitCallback] = session.info.pop(_CALLBACKS_KEY, [])
     first_error: Exception | None = None
     for callback in callbacks:
@@ -76,6 +93,11 @@ async def commit(session: AsyncSession) -> None:
         except Exception as exc:
             if first_error is None:
                 first_error = exc
+            else:
+                logger.error(
+                    "on_commit callback failed",
+                    extra={"exception_type": type(exc).__name__},
+                )
     if first_error is not None:
         raise first_error
 

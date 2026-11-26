@@ -28,6 +28,11 @@ SECURITY = {
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
+    "permissions-policy": (
+        "camera=(), microphone=(), geolocation=(), payment=()"
+    ),
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-resource-policy": "same-origin",
 }
 
 
@@ -287,7 +292,7 @@ async def test_non_http_scopes_pass_through_untouched() -> None:
 
 @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
 async def test_documentation_still_loads(path: str) -> None:
-    async with _client(create_app(_settings())) as client:
+    async with _client(create_app(_settings(api_docs_enabled=True))) as client:
         response = await client.get(path)
     assert response.status_code == 200
     _assert_security_headers(response)
@@ -415,7 +420,15 @@ def assert_page_is_covered(html: str, policy: str) -> None:
                 assert "'self'" in allowed, (src, policy)
                 continue
             origin = "/".join(src.split("/")[:3])
-            assert origin in allowed, (src, policy)
+            if origin == "https://cdn.jsdelivr.net":
+                # Pinned to the package path, never the whole origin.
+                assert origin not in allowed, ("whole origin allowed", src)
+                # A source ending in "/" matches every URL below that path.
+                assert any(
+                    src.startswith(a) for a in allowed if a.endswith("/")
+                ), (src, policy)
+            else:
+                assert origin in allowed, (src, policy)
     scripts = _directive(policy, "script-src")
     assert "'unsafe-inline'" not in scripts
     assert "'unsafe-eval'" not in scripts
@@ -433,16 +446,17 @@ def assert_page_is_covered(html: str, policy: str) -> None:
 async def test_documentation_pages_policy_covers_their_sources(
     path: str,
 ) -> None:
-    async with _client(create_app(_settings())) as client:
+    async with _client(create_app(_settings(api_docs_enabled=True))) as client:
         response = await client.get(path)
     policy = response.headers["content-security-policy"]
     assert policy != CSP_STRICT
-    assert "https://cdn.jsdelivr.net" in policy
+    assert "https://cdn.jsdelivr.net " not in policy
+    assert "https://cdn.jsdelivr.net;" not in policy
     assert_page_is_covered(response.text, policy)
 
 
 async def test_swagger_policy_hashes_the_inline_bootstrap_script() -> None:
-    async with _client(create_app(_settings())) as client:
+    async with _client(create_app(_settings(api_docs_enabled=True))) as client:
         page = await client.get("/docs")
         redirect = await client.get("/docs/oauth2-redirect")
     assert "'sha256-" in page.headers["content-security-policy"]
@@ -598,3 +612,158 @@ async def test_response_messages_may_omit_headers_and_body(
     names = {name.decode().lower() for name, _ in start["headers"]}
     assert "content-security-policy" in names
     assert "x-content-type-options" in names
+
+
+async def test_swagger_policy_names_the_package_paths_only() -> None:
+    async with _client(create_app(_settings(api_docs_enabled=True))) as client:
+        swagger = await client.get("/docs")
+        redoc = await client.get("/redoc")
+    swagger_policy = swagger.headers["content-security-policy"]
+    redoc_policy = redoc.headers["content-security-policy"]
+    assert "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/" in swagger_policy
+    assert "https://cdn.jsdelivr.net/npm/redoc@2/" in redoc_policy
+    assert "https://cdn.jsdelivr.net/npm/redoc@2/" not in swagger_policy
+
+
+async def test_new_headers_on_error_and_413_responses() -> None:
+    app = create_app(_settings(max_request_body_bytes=50))
+    async with _client(app) as client:
+        missing = await client.get("/api/v1/no-such-route")
+        too_large = await client.post("/api/v1/auth/login", content=b"x" * 51)
+    assert too_large.status_code == 413
+    for response in (missing, too_large):
+        for name, value in SECURITY.items():
+            assert response.headers[name] == value
+
+
+async def _oversize_scope(version: str) -> list[Message]:
+    async def inner(scope: Scope, receive: Receive, send: Send) -> None:
+        raise AssertionError("not reached")
+
+    sent: list[Message] = []
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    async def receive() -> Message:
+        raise AssertionError("body must not be read")
+
+    scope: Scope = {
+        "type": "http",
+        "path": "/echo",
+        "http_version": version,
+        "headers": [(b"content-length", str(LIMIT + 1).encode())],
+    }
+    await SecurityMiddleware(inner, max_body_bytes=LIMIT)(scope, receive, send)
+    return sent
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"), [("1.0", True), ("1.1", True), ("2", False)]
+)
+async def test_connection_close_only_on_http1(
+    version: str, expected: bool
+) -> None:
+    sent = await _oversize_scope(version)
+    names = {name.decode().lower() for name, _ in sent[0]["headers"]}
+    assert sent[0]["status"] == 413
+    assert ("connection" in names) is expected
+    assert "cross-origin-opener-policy" in names
+
+
+async def test_streaming_response_started_before_the_limit_is_hit() -> None:
+    """The status line is already out, so it cannot become a 413; the
+    middleware must neither crash nor send a second response."""
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        await send(
+            {"type": "http.response.start", "status": 200, "headers": []}
+        )
+        await send(
+            {"type": "http.response.body", "body": b"a", "more_body": True}
+        )
+        while (await receive()).get("more_body"):
+            pass
+        await send({"type": "http.response.body", "body": b"b"})
+
+    sent: list[Message] = []
+    chunks = iter([b"x" * 60, b"x" * 60])
+
+    async def receive() -> Message:
+        return {
+            "type": "http.request",
+            "body": next(chunks),
+            "more_body": True,
+        }
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {"type": "http", "path": "/x", "headers": []}
+    await SecurityMiddleware(app, max_body_bytes=LIMIT)(scope, receive, send)
+    starts = [m for m in sent if m["type"] == "http.response.start"]
+    assert [m["status"] for m in starts] == [200]
+    assert b"b" not in [m.get("body") for m in sent]
+
+
+async def test_app_swallowing_the_receive_error_still_gets_a_413() -> None:
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            while (await receive()).get("more_body"):
+                pass
+        except Exception:
+            body = b"{}"
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 400,
+                    "headers": [(b"content-length", b"2")],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"x" * 60, "more_body": True}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {"type": "http", "path": "/x", "headers": []}
+    await SecurityMiddleware(app, max_body_bytes=LIMIT)(scope, receive, send)
+    starts = [m for m in sent if m["type"] == "http.response.start"]
+    assert [m["status"] for m in starts] == [413]
+    bodies = [m for m in sent if m["type"] == "http.response.body"]
+    assert len(bodies) == 1 and b"too large" in bodies[0]["body"]
+
+
+async def test_cache_control_is_set_exactly_once() -> None:
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"cache-control", b"max-age=60")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b""})
+
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "path": "/x",
+        "headers": [(b"authorization", b"Bearer x")],
+    }
+    await SecurityMiddleware(app, max_body_bytes=LIMIT)(scope, receive, send)
+    values = [
+        value for name, value in sent[0]["headers"] if name == b"cache-control"
+    ]
+    assert values == [b"no-store"]

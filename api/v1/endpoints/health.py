@@ -4,7 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 
 from api.v1.docs import errors
-from components.core.config import SettingsSchema, get_settings
+from api.v1.utils import get_settings_dependency
+from components.core.config import SettingsSchema
 from components.core.health import (
     HealthCheck,
     check_database,
@@ -28,7 +29,7 @@ async def live() -> dict[str, str]:
 @router.get("/ready", summary="Readiness", responses=errors(503))
 async def ready(
     response: Response,
-    settings: Annotated[SettingsSchema, Depends(get_settings)],
+    settings: Annotated[SettingsSchema, Depends(get_settings_dependency)],
     checks: Annotated[dict[str, HealthCheck], Depends(get_health_checks)],
 ) -> dict[str, str]:
     """Readiness: every dependency answers within the timeout."""

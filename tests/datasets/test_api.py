@@ -201,7 +201,15 @@ async def test_markup_stored_unchanged_and_not_logged(
     assert marker not in caplog.text
 
 
-@pytest.mark.parametrize("query", ["limit=0", "limit=101", "offset=-1"])
+@pytest.mark.parametrize(
+    "query",
+    [
+        "limit=0",
+        "limit=101",
+        "offset=-1",
+        "offset=1000001",
+    ],
+)
 async def test_case_list_invalid_pagination_422(
     client: AsyncClient, query: str
 ) -> None:
@@ -457,3 +465,44 @@ async def test_totals_reflect_scope_and_filters(
     assert body["total"] == 3
     body = (await (await actors.client("admin")).get(f"{URL}?limit=1")).json()
     assert body["total"] == 4
+
+
+async def test_add_case_to_a_full_dataset_is_409_and_stores_nothing(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    from api.v1.utils import get_settings_dependency
+    from components.core.config import SettingsSchema
+    from conftest import TEST_JWT_SECRET
+
+    app.dependency_overrides[get_settings_dependency] = lambda: SettingsSchema(
+        _env_file=None,
+        database_url="postgresql+asyncpg://unused/unused",
+        rabbitmq_url="amqp://unused/",
+        jwt_secret_key=TEST_JWT_SECRET,
+        max_cases_per_dataset=2,
+    )
+    dataset_id = await _create(client)
+    url = f"/api/v1/datasets/{dataset_id}/cases"
+    for i in range(2):
+        assert (
+            await client.post(url, json={"input": f"c{i}"})
+        ).status_code == 201
+    full = await client.post(url, json={"input": "over"})
+    assert full.status_code == 409
+    assert "over" not in full.text
+    assert (await client.get(url)).json()["total"] == 2
+
+
+async def test_oversized_metadata_is_422_naming_the_field(
+    client: AsyncClient,
+) -> None:
+    dataset_id = await _create(client)
+    deep: dict[str, object] = {}
+    for _ in range(6):
+        deep = {"a": deep}
+    response = await client.post(
+        f"/api/v1/datasets/{dataset_id}/cases",
+        json={"input": "x", "metadata": deep},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "metadata"]

@@ -4,7 +4,8 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from api.v1.endpoints.health import get_health_checks
-from components.core.config import SettingsSchema, get_settings
+from api.v1.utils import get_settings_dependency
+from components.core.config import SettingsSchema
 from components.core.health import HealthCheck
 
 
@@ -23,7 +24,7 @@ async def test_unknown_api_version_returns_404(client: AsyncClient) -> None:
 
 def _override(app: FastAPI, checks: dict[str, HealthCheck]) -> None:
     app.dependency_overrides[get_health_checks] = lambda: checks
-    app.dependency_overrides[get_settings] = lambda: SettingsSchema(
+    app.dependency_overrides[get_settings_dependency] = lambda: SettingsSchema(
         _env_file=None,
         database_url="postgresql+asyncpg://x",
         rabbitmq_url="amqp://x",

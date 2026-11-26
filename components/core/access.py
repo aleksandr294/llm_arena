@@ -1,8 +1,9 @@
 import uuid
-from typing import Any, cast
 
 from sqlalchemy import ColumnElement, false, true
+from sqlalchemy.orm import InstrumentedAttribute
 
+from components.core.database import Base
 from components.core.enums import Role
 from components.core.exceptions import OrganizationRequiredError
 from components.core.schemas import Principal
@@ -15,7 +16,18 @@ def require_organization(principal: Principal) -> uuid.UUID:
     return principal.organization_id
 
 
-def scope_clause(model: Any, principal: Principal) -> ColumnElement[bool]:
+def _column(
+    model: type[Base], name: str
+) -> InstrumentedAttribute[uuid.UUID | None]:
+    # Models with these columns share no base class, so the lookup is by
+    # name; a missing column raises AttributeError.
+    column: InstrumentedAttribute[uuid.UUID | None] = getattr(model, name)
+    return column
+
+
+def scope_clause(
+    model: type[Base], principal: Principal
+) -> ColumnElement[bool]:
     """SQL condition limiting ``model`` rows to what ``principal`` may see.
 
     ``model`` must have ``owner_id`` and ``organization_id`` columns. Staff
@@ -24,16 +36,13 @@ def scope_clause(model: Any, principal: Principal) -> ColumnElement[bool]:
     """
     match principal.role:
         case Role.STAFF:
-            return cast(
-                ColumnElement[bool], model.owner_id == principal.user_id
-            )
+            return _column(model, "owner_id") == principal.user_id
         case Role.ADMIN:
             if principal.organization_id is None:
                 # Cannot happen (database check); fail closed regardless.
                 return false()
-            return cast(
-                ColumnElement[bool],
-                model.organization_id == principal.organization_id,
+            return (
+                _column(model, "organization_id") == principal.organization_id
             )
         case Role.SUPERADMIN:
             return true()

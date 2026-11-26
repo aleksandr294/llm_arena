@@ -5,17 +5,21 @@ from an argument, and is never printed.
 """
 
 import asyncio
+import logging
 import os
 from typing import Annotated
 
 import typer
+from sqlalchemy.exc import SQLAlchemyError
 
 from components.auth.dependencies import build_auth_service
 from components.auth.exceptions import PasswordPolicyError
 from components.core.config import get_settings
-from components.core.database import session_scope
+from components.core.database import dispose_engine, session_scope
 from components.users.dependencies import build_user_service
 from components.users.exceptions import DuplicateEmailError, InvalidEmailError
+
+logger = logging.getLogger(__name__)
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -28,12 +32,16 @@ def main() -> None:
 
 
 async def _create_superadmin(email: str, password: str) -> str:
-    async with session_scope() as session:
-        service = build_user_service(
-            session, build_auth_service(session, get_settings())
-        )
-        user = await service.create_superadmin(email, password)
-        return str(user.id)
+    try:
+        async with session_scope() as session:
+            service = build_user_service(
+                session, build_auth_service(session, get_settings())
+            )
+            user = await service.create_superadmin(email, password)
+            return str(user.id)
+    finally:
+        # asyncio.run closes the loop next; release the pool first.
+        await dispose_engine()
 
 
 @app.command("create-superadmin")
@@ -50,6 +58,12 @@ def create_superadmin(
         user_id = asyncio.run(_create_superadmin(email, password))
     except (InvalidEmailError, PasswordPolicyError, DuplicateEmailError) as exc:
         typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from None
+    except (SQLAlchemyError, OSError) as exc:
+        # The message may carry the connection URL; say nothing but the
+        # class, and only at debug level.
+        logger.debug("database error: %s", type(exc).__name__)
+        typer.echo("Error: database unavailable", err=True)
         raise typer.Exit(1) from None
     typer.echo(user_id)
 

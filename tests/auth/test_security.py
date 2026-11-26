@@ -37,7 +37,7 @@ PASSWORD = "correct horse battery"
 
 def _settings(**overrides: Any) -> SettingsSchema:
     values: dict[str, Any] = {
-        "database_url": "postgresql://x",
+        "database_url": "postgresql+asyncpg://x",
         "rabbitmq_url": "amqp://x",
         "jwt_secret_key": SECRET,
         **overrides,
