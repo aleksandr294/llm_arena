@@ -66,7 +66,7 @@ Sleep = Callable[[float], Awaitable[None]]
 
 
 def _default_jitter() -> float:
-    return random.uniform(  # nosec B311 - non-cryptographic retry jitter
+    return random.uniform(  # noqa: S311 - non-cryptographic retry jitter
         0, JUDGE_JITTER_MAX_SECONDS
     )
 

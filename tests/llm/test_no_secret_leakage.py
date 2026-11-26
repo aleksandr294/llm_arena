@@ -32,7 +32,7 @@ HTTP_REQUEST = httpx2.Request("POST", "https://example.invalid/v1")
 
 def _settings(**overrides: Any) -> SettingsSchema:
     values: dict[str, Any] = {
-        "database_url": "postgresql://x",
+        "database_url": "postgresql+asyncpg://x",
         "rabbitmq_url": "amqp://x",
         "openai_api_key": KEY,
         "anthropic_api_key": KEY,

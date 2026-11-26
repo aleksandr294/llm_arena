@@ -69,6 +69,13 @@ class LLMService:
         self._providers[name] = provider
         return provider
 
+    async def aclose(self) -> None:
+        """Close the HTTP clients of the adapters created so far."""
+        providers = list(self._providers.values())
+        self._providers.clear()
+        for provider in providers:
+            await provider.aclose()
+
     def ensure_provider_ready(self, name: ProviderName) -> None:
         """Raise ``ProviderNotConfiguredError`` (or
         ``UnsupportedProviderError``) unless the provider can be used.

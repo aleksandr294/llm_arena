@@ -409,7 +409,7 @@ async def test_one_commit_per_write_operation(
     superadmin = actors.principal("superadmin")
 
     async def create_dataset(session: AsyncSession) -> None:
-        await build_dataset_service(session).create_dataset(
+        await build_dataset_service(session, settings).create_dataset(
             staff, DatasetCreateSchema(name="d")
         )
 

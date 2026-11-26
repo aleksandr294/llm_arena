@@ -1,16 +1,24 @@
 """Integration tests: need PostgreSQL (``DATABASE_URL``)."""
 
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
-from sqlalchemy import String
+from sqlalchemy import String, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Mapped, mapped_column
 
 from components.core import database
-from components.core.database import Base, create_engine, get_session
+from components.core.database import (
+    Base,
+    commit,
+    create_engine,
+    get_session,
+    on_commit,
+)
 from components.core.repository import BaseRepository
 from tests.helpers import checked_database_url
 
@@ -41,7 +49,7 @@ async def factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
 
 async def _count(factory: async_sessionmaker[AsyncSession]) -> int:
     async with factory() as session:
-        return len(await ProbeRepository(session).list())
+        return len((await session.scalars(select(ProbeModel))).all())
 
 
 async def test_repository_crud(
@@ -51,7 +59,7 @@ async def test_repository_crud(
         repo = ProbeRepository(session)
         entity = await repo.add(ProbeModel(name="a"))
         assert (await repo.get(entity.id)) is entity
-        assert len(await repo.list()) == 1
+        assert len((await session.scalars(select(ProbeModel))).all()) == 1
 
         entity.name = "b"
         await session.flush()
@@ -111,3 +119,59 @@ async def test_autogenerate_detects_model_table(
     assert any(
         op[0] == "add_table" and op[1].name == "persistence_probe" for op in ops
     )
+
+
+async def test_every_failing_callback_is_reported(
+    factory: async_sessionmaker[AsyncSession],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ran: list[str] = []
+
+    async def first() -> None:
+        ran.append("first")
+        raise ValueError("first-secret-text")
+
+    async def second() -> None:
+        ran.append("second")
+        raise KeyError("second-secret-text")
+
+    async def third() -> None:
+        ran.append("third")
+
+    async with factory() as session:
+        await ProbeRepository(session).add(ProbeModel(name="kept"))
+        for callback in (first, second, third):
+            on_commit(session, callback)
+        with (
+            caplog.at_level(logging.ERROR, logger=database.logger.name),
+            pytest.raises(ValueError, match="first-secret-text"),
+        ):
+            await commit(session)
+
+    assert ran == ["first", "second", "third"]
+    assert await _count(factory) == 1
+    messages = [r for r in caplog.records if r.name == database.logger.name]
+    assert [r.exception_type for r in messages] == ["KeyError"]  # type: ignore[attr-defined]
+    assert "second-secret-text" not in caplog.text
+
+
+async def test_failed_commit_discards_callbacks(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    ran: list[str] = []
+
+    async def callback() -> None:
+        ran.append("ran")
+
+    async with factory() as session:
+        on_commit(session, callback)
+        session.add(ProbeModel(id=1, name="a"))
+        session.add(ProbeModel(id=1, name="duplicate"))
+        with pytest.raises(IntegrityError):
+            await commit(session)
+        await session.rollback()
+
+        session.add(ProbeModel(id=2, name="b"))
+        await commit(session)
+
+    assert ran == []

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headersHelper": "scripts/github-mcp-headers.sh"
+    }
+  }
+}

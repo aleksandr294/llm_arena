@@ -85,7 +85,7 @@ _context_bound: ContextVar[bool] = ContextVar(
 # ``save_model`` on create, never serialized, filtered or sorted by. The
 # initial password is deliberately NOT the ``password_hash`` column name, so
 # no code path can confuse the input with the stored hash.
-PASSWORD_FIELD = "password"
+PASSWORD_FIELD = "password"  # noqa: S105 - a form field name, not a secret
 ORGANIZATION_FIELD = "organization_id"
 FORM_ONLY_FIELDS = frozenset({PASSWORD_FIELD, ORGANIZATION_FIELD})
 # Upper bound on ids of one bulk action.

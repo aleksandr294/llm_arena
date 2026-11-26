@@ -163,6 +163,8 @@ async def test_unknown_experiment_is_404(
         "limit=101",
         "limit=x",
         "offset=-1",
+        "offset=1000001",
+        f"evaluator_id={'x' * 65}",
         "status=bogus",
         "status=PASSED",
     ],
@@ -405,6 +407,8 @@ async def test_no_transaction_is_open_while_enqueueing(
                     "SELECT count(*) FROM pg_stat_activity "
                     "WHERE datname = current_database() "
                     "AND pid <> pg_backend_pid() "
+                    "AND application_name = "
+                    "current_setting('application_name') "
                     "AND state = 'idle in transaction'"
                 )
             )

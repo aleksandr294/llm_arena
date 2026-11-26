@@ -59,6 +59,11 @@ def _run(code: str, tmp_path: Path, **env: str) -> dict[str, object]:
         for k, v in os.environ.items()
         if not k.startswith(("ADMIN_", "DATABASE_", "RABBITMQ_"))
     }
+    # Importing ``taskiq_app`` builds the settings at import time, and these
+    # prefixes were stripped above: without placeholders the child depends on
+    # a developer's .env file and fails on a clean checkout (CI).
+    clean["DATABASE_URL"] = "postgresql+asyncpg://unused/unused"
+    clean["RABBITMQ_URL"] = "amqp://unused/"
     clean.update(env)
     clean["PYTHONPATH"] = f"{tmp_path}{os.pathsep}{ROOT}"
     done = subprocess.run(
@@ -132,6 +137,7 @@ def test_mount_with_secret_configures_fastadmin_before_import(
         app = create_app(settings(
             admin_secret_key={ADMIN_SECRET!r},
             admin_session_cookie_secure=False,
+            api_docs_enabled=True,
         ))
         import probe_admin_module as probe
         index = asyncio.run(get(app, "/admin/"))
@@ -167,6 +173,23 @@ def test_cookie_secure_defaults_to_true(tmp_path: Path) -> None:
         tmp_path,
     )
     assert result == {"secure": True}
+
+
+def test_fastadmin_cookie_name_matches_the_middleware(
+    tmp_path: Path,
+) -> None:
+    """The middleware's ``no-store`` rule keys on this cookie name."""
+    from api.middleware import ADMIN_SESSION_COOKIE
+
+    result = _run(
+        f"""
+        create_app(settings(admin_secret_key={ADMIN_SECRET!r}))
+        import fastadmin.settings as fs
+        print(json.dumps({{"name": fs.settings.ADMIN_SESSION_ID_KEY}}))
+        """,
+        tmp_path,
+    )
+    assert result == {"name": ADMIN_SESSION_COOKIE}
 
 
 def test_second_mount_reuses_the_single_fastadmin_import(

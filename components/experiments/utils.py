@@ -9,9 +9,9 @@ from collections.abc import Mapping
 from components.experiments.enums import ExperimentStatus, ResultStatus
 
 INPUT_TOKEN = (
-    "{input}"  # nosec B105 - prompt template placeholder, not a password
+    "{input}"  # noqa: S105 - prompt template placeholder, not a password
 )
-EXPECTED_OUTPUT_TOKEN = "{expected_output}"  # nosec B105 - prompt template placeholder, not a password
+EXPECTED_OUTPUT_TOKEN = "{expected_output}"  # noqa: S105 - prompt template placeholder, not a password
 # Bounds on rendered prompts, checked before any prompt is built. A template
 # may repeat ``{input}`` many times over many large cases, so the sizes of
 # the schema fields alone do not bound what one request stores. Constants

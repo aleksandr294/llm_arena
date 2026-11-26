@@ -176,9 +176,10 @@ the database first (for the compose database from the host, use the
 | Lint | `ruff check .` |
 | Format check | `black --check .` (use `black .` to format) |
 | Types | `mypy` |
-| Static security analysis | `poetry run bandit -c pyproject.toml -r -ll components api admin cli.py main.py taskiq_app.py migrations scripts` |
+| Static security analysis | `poetry run ruff check --select S components api admin cli.py main.py taskiq_app.py migrations migrations/versions/*.py scripts` |
 | Dependency audit (needs network) | `poetry run pip-audit` |
-| Dynamic scan (OWASP ZAP) | throwaway instance only, see [Security](docs/security.md) |
+| SQL injection scan (sqlmap, runs in CI) | `scripts/ci_sqlmap.sh <reports-dir>`, throwaway instance only, see [CI](docs/ci.md) |
+| Dynamic scan (OWASP ZAP, manual) | throwaway instance only, see [Security](docs/security.md) |
 | All pre-commit hooks | `pre-commit run --all-files` |
 | Real-provider tests (opt-in, cost money) | see [Testing](docs/testing.md) |
 | Kan board helper | `scripts/kan.py`, see "Task tracking (Kan)" in `CLAUDE.md` |
@@ -322,8 +323,8 @@ Known limits:
 - There is no login rate limiting (REST or admin panel); limit
   `/api/v1/auth/login` and `/admin/api/sign-in` at a proxy if the API is
   exposed.
-- Swagger UI and ReDoc load assets from a CDN; set `API_DOCS_ENABLED=false`
-  for production exposure.
+- Swagger UI and ReDoc are off by default (`API_DOCS_ENABLED=true` enables
+  them; `.env.example` does) and load assets from a CDN.
 
 ### Configuration and secrets
 
@@ -346,8 +347,12 @@ The workflow is defined in `CLAUDE.md`; this is the short version.
   `main` (for example `feat/<change-name>`); never work on `main` or reuse an
   earlier feature's branch.
 - **Commits:** [Conventional Commits](https://www.conventionalcommits.org/)
-  (the `git-conventional-commits` skill). Commits stay local; nothing is
-  pushed, merged or opened as a pull request unless the owner asks.
+  (the `git-conventional-commits` skill). When a flow finishes, the main
+  session commits, pushes the feature branch and opens a pull request against
+  `main` through the GitHub MCP server, provided the branch is not `main`,
+  the tree is clean, the checks passed and valid review findings are
+  addressed. Merging, force-pushing, pushing `main` and bypassing checks need
+  the owner's explicit authorization.
 - **Task board:** tasks live on a local Kan board (`scripts/kan.py`).
   Columns are `Open`, `In-progress`, `Review` and `Done`: move a card to
   `In-progress` when work starts, to `Review` after the independent review
@@ -356,7 +361,7 @@ The workflow is defined in `CLAUDE.md`; this is the short version.
 - **Subagents:** `coder` implements one task, `tester` adds tests and runs
   the checks, `reviewer` reviews the diff read-only (see
   [Development agents](docs/development-agents.md)). The main session
-  commits.
+  commits, pushes and opens the pull request; subagents never do.
 - **Review:** an independent review happens before a pull request, and valid
   findings are addressed.
 - **Testing policy:** unit tests for domain logic and evaluators, integration
@@ -386,6 +391,7 @@ Reference pages (moved out of this file; content unchanged):
 - [Interactive API documentation](docs/api-documentation.md)
 - [Migrations](docs/migrations.md)
 - [Quality checks and real-provider tests](docs/testing.md)
+- [Continuous integration (pull-request workflow)](docs/ci.md)
 - [Development agents](docs/development-agents.md)
 - [Security checks and findings register](docs/security.md)
 - [Observability: logs, metrics, Grafana](docs/observability.md)

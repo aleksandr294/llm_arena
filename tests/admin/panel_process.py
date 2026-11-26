@@ -15,6 +15,11 @@ from pathlib import Path
 from typing import IO, Any
 
 from conftest import TEST_JWT_SECRET
+from tests.helpers import (
+    SchemaRouting,
+    database_of,
+    worker_schema,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 ADMIN_SECRET = "admin-secret-for-tests-0123456789abcdef-xyz"
@@ -35,7 +40,10 @@ class Reply:
 
 
 def child_environment() -> dict[str, str]:
-    """Environment of a process serving the app with the panel mounted."""
+    """Environment of a process serving the app with the panel mounted.
+
+    ``PYTEST_XDIST_WORKER`` is inherited, which is how the process finds
+    its schema (see ``route_to_worker_schema``)."""
     env = {
         k: v
         for k, v in os.environ.items()
@@ -50,6 +58,14 @@ def child_environment() -> dict[str, str]:
         PYTHONPATH=str(ROOT),
     )
     return env
+
+
+def route_to_worker_schema() -> None:
+    """In a child process: use the schema of the test that started it (see
+    ``tests.helpers.SchemaRouting``)."""
+    schema = worker_schema()
+    if schema is not None:
+        SchemaRouting(schema, database_of(os.environ["DATABASE_URL"])).install()
 
 
 class Panel:

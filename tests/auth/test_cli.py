@@ -246,10 +246,56 @@ def test_main_still_exposes_api_command(
 
 
 def test_no_http_route_creates_users() -> None:
+    # Built without the admin panel: mounting it imports fastadmin, which
+    # fails when another test module already imported it with another key.
+    settings = SettingsSchema(
+        database_url="postgresql+asyncpg://unused/unused",
+        rabbitmq_url="amqp://unused/",
+        admin_secret_key=None,
+    )
     methods_by_path: dict[str, set[str]] = {
         getattr(r, "path", ""): getattr(r, "methods", set())
-        for r in create_app().routes
+        for r in create_app(settings).routes
     }
     for path, methods in methods_by_path.items():
         if "POST" in methods:
             assert "user" not in path and "superadmin" not in path, path
+
+
+def test_unreachable_database_is_a_one_line_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret_url = "postgresql+asyncpg://user:s3cret-pw@127.0.0.1:1/db"
+    factory = async_sessionmaker(
+        create_async_engine(secret_url, poolclass=NullPool),
+        expire_on_commit=False,
+    )
+    monkeypatch.setattr(database, "get_session_factory", lambda: factory)
+    monkeypatch.setenv(cli.PASSWORD_ENV, PASSWORD)
+    result = runner.invoke(cli.app, ["create-superadmin", "--email", EMAIL])
+    # click merges stderr into result.output
+    output = str(result.output)
+    assert result.exit_code == 1
+    assert output.strip() == "Error: database unavailable"
+    assert "s3cret-pw" not in output and "127.0.0.1" not in output
+    assert "Traceback" not in output
+    assert PASSWORD not in output
+
+
+def test_engine_is_disposed_after_the_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    disposed: list[bool] = []
+
+    async def dispose() -> None:
+        disposed.append(True)
+
+    monkeypatch.setattr(cli, "dispose_engine", dispose)
+    monkeypatch.setenv(cli.PASSWORD_ENV, PASSWORD)
+    assert (
+        runner.invoke(
+            cli.app, ["create-superadmin", "--email", EMAIL]
+        ).exit_code
+        == 0
+    )
+    assert disposed == [True]

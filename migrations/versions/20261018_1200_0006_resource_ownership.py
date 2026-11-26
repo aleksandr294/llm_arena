@@ -53,7 +53,7 @@ def upgrade() -> None:
         op.add_column(
             table, sa.Column("organization_id", sa.Uuid(), nullable=True)
         )
-        backfill = f"UPDATE {table} SET organization_id = :org"  # nosec B608 - table names come from the module-level TABLES constant, never user input
+        backfill = f"UPDATE {table} SET organization_id = :org"  # noqa: S608 - table names come from the module-level TABLES constant, never user input
         bind.execute(
             sa.text(backfill),
             {"org": default_id},

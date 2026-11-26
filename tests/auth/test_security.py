@@ -37,7 +37,7 @@ PASSWORD = "correct horse battery"
 
 def _settings(**overrides: Any) -> SettingsSchema:
     values: dict[str, Any] = {
-        "database_url": "postgresql://x",
+        "database_url": "postgresql+asyncpg://x",
         "rabbitmq_url": "amqp://x",
         "jwt_secret_key": SECRET,
         **overrides,
@@ -187,7 +187,7 @@ def test_algorithm_none_is_rejected() -> None:
             "jti": "x",
             "typ": "access",
         },
-        None,
+        "",  # the "none" algorithm takes no key
         algorithm="none",
     )
 

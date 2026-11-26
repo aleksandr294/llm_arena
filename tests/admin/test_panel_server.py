@@ -36,19 +36,7 @@ def server() -> Iterator[str]:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "api.app:create_app",
-            "--factory",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-            "--log-level",
-            "warning",
-        ],
+        [sys.executable, "-m", "tests.admin.uvicorn_child", str(port)],
         cwd=ROOT,
         env=child_environment(),
         stdout=subprocess.DEVNULL,

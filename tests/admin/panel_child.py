@@ -56,8 +56,15 @@ def _simulate_unbound_user() -> None:
     ApiService._get_authenticated_user = authenticated
 
 
+def _route_to_worker_schema() -> None:
+    from tests.admin.panel_process import route_to_worker_schema
+
+    route_to_worker_schema()
+
+
 async def _serve() -> None:
     _configure_logging()
+    _route_to_worker_schema()
     app = create_app()
     _simulate_unbound_user()
     transport = ASGITransport(app=app, raise_app_exceptions=False)

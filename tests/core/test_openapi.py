@@ -153,21 +153,95 @@ async def _status(app: FastAPI, path: str) -> int:
 
 
 @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
-async def test_docs_are_served_by_default(path: str) -> None:
-    assert await _status(create_app(_settings()), path) == 200
-
-
-@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
-async def test_docs_can_be_turned_off(path: str) -> None:
-    app = create_app(_settings(api_docs_enabled=False))
+async def test_docs_are_off_by_default(
+    path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("API_DOCS_ENABLED", raising=False)
+    app = create_app(_settings())
     assert await _status(app, path) == 404
     assert await _status(app, "/api/v1/health/live") == 200
 
 
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+async def test_docs_can_be_turned_on(path: str) -> None:
+    app = create_app(_settings(api_docs_enabled=True))
+    assert await _status(app, path) == 200
+
+
 async def test_swagger_ui_keeps_the_authorization() -> None:
-    app = create_app(_settings())
+    app = create_app(_settings(api_docs_enabled=True))
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         page = (await client.get("/docs")).text
     assert '"persistAuthorization": true' in page
+
+
+async def test_lifespan_shuts_the_broker_and_llm_service_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import api.app as app_module
+
+    calls: list[str] = []
+
+    async def shutdown_broker() -> None:
+        calls.append("broker")
+
+    async def dispose_engine() -> None:
+        calls.append("engine")
+
+    monkeypatch.setattr(app_module, "shutdown_broker", shutdown_broker)
+    monkeypatch.setattr(app_module, "dispose_engine", dispose_engine)
+    app = create_app(_settings())
+    closed: list[bool] = []
+
+    async def aclose() -> None:
+        closed.append(True)
+
+    monkeypatch.setattr(app.state.llm_service, "aclose", aclose)
+    async with app.router.lifespan_context(app):
+        assert calls == []
+    assert calls == ["broker", "engine"] and closed == [True]
+
+
+async def test_lifespan_releases_everything_when_the_broker_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import api.app as app_module
+
+    calls: list[str] = []
+
+    async def shutdown_broker() -> None:
+        calls.append("broker")
+        raise ConnectionError("rabbitmq is down")
+
+    async def dispose_engine() -> None:
+        calls.append("engine")
+
+    monkeypatch.setattr(app_module, "shutdown_broker", shutdown_broker)
+    monkeypatch.setattr(app_module, "dispose_engine", dispose_engine)
+    app = create_app(_settings())
+
+    async def aclose() -> None:
+        calls.append("llm")
+
+    monkeypatch.setattr(app.state.llm_service, "aclose", aclose)
+    with pytest.raises(ConnectionError):
+        async with app.router.lifespan_context(app):
+            pass
+    assert calls == ["broker", "llm", "engine"]
+
+
+async def test_one_llm_service_per_app() -> None:
+    from api.v1.endpoints.experiments import get_llm_service
+
+    app = create_app(_settings())
+
+    class _Request:
+        pass
+
+    request = _Request()
+    request.app = app  # type: ignore[attr-defined]
+    first = get_llm_service(request)  # type: ignore[arg-type]
+    assert get_llm_service(request) is first  # type: ignore[arg-type]
+    assert first is app.state.llm_service
