@@ -22,8 +22,6 @@ from components.users.models import User
 from tests.access import ACCESS_MODELS, seed_organization
 from tests.helpers import checked_database_url
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture
 async def session() -> AsyncIterator[AsyncSession]:

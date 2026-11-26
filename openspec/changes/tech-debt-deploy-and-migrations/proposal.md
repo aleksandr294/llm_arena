@@ -32,7 +32,7 @@ docs lag behind the migrations.
   check, a model-vs-migration drift check; `compare_type=True` in
   `migrations/env.py`; dead logging sections removed from `alembic.ini`.
 - Docs: `docs/migrations.md` and README stop hard-coding the head revision and
-  describe `0007`-`0010`; `docs/testing.md` lists Bandit and pip-audit; README
+  describe `0007`-`0010`; `docs/testing.md` lists the Ruff S rules and pip-audit; README
   quick start documents the compose variables.
 
 ## Capabilities

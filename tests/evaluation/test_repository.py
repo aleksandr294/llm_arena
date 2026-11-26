@@ -3,7 +3,6 @@
 import uuid
 from typing import Any
 
-import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -14,8 +13,6 @@ from components.evaluation.repository import EvaluationRepository
 from components.experiments.enums import ResultStatus
 from components.experiments.models import Experiment, ExperimentResult
 from tests.access import seed_organization
-
-pytestmark = pytest.mark.integration
 
 Factory = async_sessionmaker[AsyncSession]
 

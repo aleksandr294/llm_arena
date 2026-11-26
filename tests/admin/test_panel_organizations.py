@@ -13,8 +13,6 @@ from tests.access import PASSWORD
 from tests.admin.helpers import World
 from tests.admin.panel_process import API, Panel
 
-pytestmark = pytest.mark.integration
-
 
 def _change(
     panel: Panel, client: str, org: uuid.UUID, body: object

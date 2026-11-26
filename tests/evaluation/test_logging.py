@@ -25,8 +25,6 @@ from tests.evaluation.helpers import ScopedEvaluation
 from tests.evaluation.test_repository import Factory, _setup
 from tests.experiments.helpers import Enqueued
 
-pytestmark = pytest.mark.integration
-
 RESPONSE = "SENTINEL-RESPONSE-7d3f"
 EXPECTED = "SENTINEL-EXPECTED-19ac"
 ALL_EVALUATORS: dict[str, Any] = {

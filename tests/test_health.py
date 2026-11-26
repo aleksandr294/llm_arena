@@ -5,8 +5,8 @@ from httpx import AsyncClient
 
 from api.v1.endpoints.health import get_health_checks
 from api.v1.utils import get_settings_dependency
-from components.core.config import SettingsSchema
 from components.core.health import HealthCheck
+from tests.helpers import make_settings
 
 
 async def test_liveness_returns_200(client: AsyncClient) -> None:
@@ -24,11 +24,8 @@ async def test_unknown_api_version_returns_404(client: AsyncClient) -> None:
 
 def _override(app: FastAPI, checks: dict[str, HealthCheck]) -> None:
     app.dependency_overrides[get_health_checks] = lambda: checks
-    app.dependency_overrides[get_settings_dependency] = lambda: SettingsSchema(
-        _env_file=None,
-        database_url="postgresql+asyncpg://x",
-        rabbitmq_url="amqp://x",
-        health_check_timeout_seconds=0.2,
+    app.dependency_overrides[get_settings_dependency] = lambda: make_settings(
+        health_check_timeout_seconds=0.2
     )
 
 
@@ -41,7 +38,8 @@ async def _down() -> None:
 
 
 async def _hang() -> None:
-    await asyncio.sleep(10)
+    # Never set: the check ends only when the endpoint's timeout cancels it.
+    await asyncio.Event().wait()
 
 
 async def test_ready_returns_200_when_all_healthy(

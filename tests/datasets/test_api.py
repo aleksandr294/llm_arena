@@ -15,8 +15,6 @@ from components.core.database import get_session, session_scope
 from components.datasets.models import Dataset
 from tests.access import Actors
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture(autouse=True)
 def _use_scratch_db(
@@ -472,7 +470,7 @@ async def test_add_case_to_a_full_dataset_is_409_and_stores_nothing(
 ) -> None:
     from api.v1.utils import get_settings_dependency
     from components.core.config import SettingsSchema
-    from conftest import TEST_JWT_SECRET
+    from tests.helpers import TEST_JWT_SECRET
 
     app.dependency_overrides[get_settings_dependency] = lambda: SettingsSchema(
         _env_file=None,

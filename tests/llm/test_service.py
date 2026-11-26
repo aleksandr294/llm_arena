@@ -16,17 +16,17 @@ from components.third_party.llm.schemas import (
     ModelTargetSchema,
 )
 from components.third_party.llm.service import LLMService
+from tests.helpers import make_settings
 
 
 def _settings(**overrides: Any) -> SettingsSchema:
-    values: dict[str, Any] = {
-        "database_url": "postgresql+asyncpg://x",
-        "rabbitmq_url": "amqp://x",
-        "openai_api_key": "sk-openai",
-        "anthropic_api_key": "sk-anthropic",
-        **overrides,
-    }
-    return SettingsSchema(_env_file=None, **values)
+    return make_settings(
+        **{
+            "openai_api_key": "sk-openai",
+            "anthropic_api_key": "sk-anthropic",
+            **overrides,
+        }
+    )
 
 
 class FakeProvider:

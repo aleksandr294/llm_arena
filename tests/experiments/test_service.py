@@ -33,8 +33,6 @@ from tests.experiments.helpers import (
     make_experiment,
 )
 
-pytestmark = pytest.mark.integration
-
 
 def _service(
     session: AsyncSession,

@@ -13,8 +13,7 @@ from api.metrics import (
     MetricsMiddleware,
     metrics_endpoint,
 )
-from components.core.config import SettingsSchema
-from conftest import TEST_JWT_SECRET
+from tests.helpers import make_settings
 
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -87,13 +86,7 @@ async def test_unmatched_route_does_not_leak_raw_path() -> None:
 async def test_metrics_endpoint_serves_registered_counters() -> None:
     from api.app import create_app
 
-    settings = SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-        jwt_secret_key=TEST_JWT_SECRET,
-        admin_secret_key=None,
-        _env_file=None,
-    )
+    settings = make_settings()
     app = create_app(settings)
     async with _client(app) as client:
         await client.get("/api/v1/health/live")

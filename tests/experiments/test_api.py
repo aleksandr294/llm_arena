@@ -27,8 +27,6 @@ from tests.experiments.helpers import (
     scope_of,
 )
 
-pytestmark = pytest.mark.integration
-
 URL = "/api/v1/experiments"
 
 

@@ -10,8 +10,6 @@ from components.auth.models import RefreshToken
 from components.core.enums import Role
 from tests.auth.helpers import Factory, login_headers, seed_user
 
-pytestmark = pytest.mark.integration
-
 URL = "/api/v1/organizations"
 
 

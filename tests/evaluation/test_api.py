@@ -19,8 +19,6 @@ from tests.evaluation.helpers import ScopedEvaluation
 from tests.evaluation.test_repository import Factory, _setup
 from tests.experiments.helpers import Enqueued
 
-pytestmark = pytest.mark.integration
-
 CONFIG: dict[str, Any] = {
     "evaluators": [
         {"id": "exact", "type": "exact_match"},

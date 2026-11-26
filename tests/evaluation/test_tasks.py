@@ -31,8 +31,6 @@ from tests.experiments.helpers import (
     scope_of,
 )
 
-pytestmark = pytest.mark.integration
-
 _MODULES = (
     "taskiq_app",
     "components.evaluation.tasks",

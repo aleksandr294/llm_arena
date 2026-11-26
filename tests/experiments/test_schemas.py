@@ -62,9 +62,18 @@ def test_valid_full_payload() -> None:
 
 def test_same_model_on_different_providers_is_distinct() -> None:
     targets = [_target(0, "openai"), _target(0, "anthropic")]
-    ExperimentCreateSchema.model_validate(
+    parsed = ExperimentCreateSchema.model_validate(
         _payload(config=_config(targets=targets))
     )
+
+    assert {(t.provider, t.model) for t in parsed.config.targets} == {
+        ("openai", "m0"),
+        ("anthropic", "m0"),
+    }
+    with pytest.raises(ValidationError):
+        ExperimentCreateSchema.model_validate(
+            _payload(config=_config(targets=[targets[0], targets[0]]))
+        )
 
 
 @pytest.mark.parametrize(

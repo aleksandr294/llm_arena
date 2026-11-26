@@ -14,8 +14,6 @@ from components.metrics.schemas import ComparisonSchema
 from tests.access import ROOT
 from tests.metrics.helpers import Row, seed
 
-pytestmark = pytest.mark.integration
-
 Factory = async_sessionmaker[AsyncSession]
 
 

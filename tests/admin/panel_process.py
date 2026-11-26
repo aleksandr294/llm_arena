@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
 
-from conftest import TEST_JWT_SECRET
 from tests.helpers import (
+    TEST_JWT_SECRET,
     SchemaRouting,
     database_of,
     worker_schema,
