@@ -3,7 +3,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from components.core.access import scope_clause
 from components.core.repository import BaseRepository
@@ -35,6 +35,25 @@ class ExperimentRepository(BaseRepository[Experiment]):
 
     async def delete(self, entity: Experiment) -> None:
         raise NotImplementedError(_USE_SCOPED)
+
+    async def delete_scoped(
+        self, experiment: Experiment, principal: Principal
+    ) -> None:
+        """Delete a visible experiment; the database cascades to its
+        results and evaluations. The caller must hold the row lock and have
+        checked the status. An out-of-scope row is refused."""
+        deleted = await self.session.scalar(
+            delete(Experiment)
+            .where(
+                Experiment.id == experiment.id,
+                scope_clause(Experiment, principal),
+            )
+            .returning(Experiment.id)
+        )
+        if deleted is None:
+            raise LookupError("experiment not visible to the caller")
+        await self.session.flush()
+        self.session.expunge(experiment)
 
     async def list_page(
         self,

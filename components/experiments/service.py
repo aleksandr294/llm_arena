@@ -246,6 +246,23 @@ class ExperimentService:
         await finalize_experiment(experiment, self.results)
         return await self._commit_and_enqueue(ids)
 
+    async def delete(
+        self, principal: Principal, experiment_id: uuid.UUID
+    ) -> None:
+        """Delete a finished experiment with its results and evaluations
+        (database cascade). Irreversible. Pending and running experiments
+        are refused so no worker writes results mid-delete. The caller
+        commits."""
+        experiment = await self._locked(principal, experiment_id)
+        if experiment.status in (
+            ExperimentStatus.PENDING.value,
+            ExperimentStatus.RUNNING.value,
+        ):
+            raise InvalidTransitionError(
+                experiment_id, experiment.status, "delete"
+            )
+        await self.experiments.delete_scoped(experiment, principal)
+
     async def _commit_and_enqueue(self, ids: Sequence[uuid.UUID]) -> int:
         if ids:
 

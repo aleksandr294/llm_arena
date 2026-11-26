@@ -32,6 +32,22 @@ class RefreshTokenRepository(BaseRepository[RefreshToken]):
             select(RefreshToken).where(RefreshToken.token_hash == token_hash)
         )
 
+    async def count_active_for_user(self, user_id: uuid.UUID) -> int:
+        """Tokens of a user that are neither revoked, expired nor already
+        rotated (a used token cannot be exchanged again). A count only: no
+        token value or hash leaves the repository."""
+        total = await self.session.scalar(
+            select(func.count())
+            .select_from(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.used_at.is_(None),
+                RefreshToken.expires_at > func.now(),
+            )
+        )
+        return total or 0
+
     async def mark_used(self, token_id: uuid.UUID) -> bool:
         """Atomically mark a token used. Returns False when it was already
         used or revoked, so concurrent refreshes cannot both succeed."""
