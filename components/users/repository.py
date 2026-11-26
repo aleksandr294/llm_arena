@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 
 from sqlalchemy import func, select, update
 
@@ -34,6 +35,36 @@ class UserRepository(BaseRepository[User]):
         """Look up by email ignoring case."""
         return await self.session.scalar(
             select(User).where(User.email_lower == email.lower())
+        )
+
+    async def get_for_update(self, user_id: uuid.UUID) -> User | None:
+        """Lock the user row and refresh it. Lock order everywhere: user
+        row first, then its refresh tokens, so writers cannot deadlock."""
+        return await self.session.scalar(
+            select(User)
+            .where(User.id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
+    async def end_access_tokens(self, user_id: uuid.UUID, at: datetime) -> None:
+        """Reject every access token issued before ``at``."""
+        await self.session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(tokens_valid_after=at)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def end_access_tokens_for_organization(
+        self, organization_id: uuid.UUID, at: datetime
+    ) -> None:
+        """``end_access_tokens`` for every user of an organization."""
+        await self.session.execute(
+            update(User)
+            .where(User.organization_id == organization_id)
+            .values(tokens_valid_after=at)
+            .execution_options(synchronize_session=False)
         )
 
     async def replace_password_hash(

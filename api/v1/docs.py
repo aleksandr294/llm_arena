@@ -14,6 +14,8 @@ _DESCRIPTIONS = {
     403: "The caller's role or organization does not allow this.",
     404: "The resource does not exist or is not visible to the caller.",
     409: "The request conflicts with the current state.",
+    429: "Too many failed attempts or too many active experiments; see the "
+    "Retry-After header where present.",
     503: "A dependency is failing.",
 }
 

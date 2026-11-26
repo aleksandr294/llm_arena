@@ -21,6 +21,14 @@ class AccessTokenRejectedError(Exception):
         self.reason = reason
 
 
+class AuthThrottledError(Exception):
+    """Too many failed attempts; ``retry_after`` is the seconds to wait."""
+
+    def __init__(self, retry_after: int) -> None:
+        super().__init__("too many failed attempts")
+        self.retry_after = retry_after
+
+
 class PasswordPolicyError(ValueError):
     """The password violates the policy; the message never echoes it."""
 
@@ -29,9 +37,9 @@ class TokenError(Exception):
     """Base class for token validation failures (messages carry no token)."""
 
 
-class InvalidTokenError(TokenError):
+class TokenInvalidError(TokenError):
     pass
 
 
-class ExpiredTokenError(TokenError):
+class TokenExpiredError(TokenError):
     pass

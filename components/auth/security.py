@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from typing import Any, Final
 
 import jwt
@@ -14,9 +15,9 @@ from argon2.exceptions import InvalidHashError, VerificationError
 
 from components.auth.enums import TokenType
 from components.auth.exceptions import (
-    ExpiredTokenError,
-    InvalidTokenError,
     PasswordPolicyError,
+    TokenExpiredError,
+    TokenInvalidError,
 )
 from components.core.config import SettingsSchema
 
@@ -28,8 +29,13 @@ _REQUIRED_CLAIMS: Final = ["exp", "iat", "iss", "sub", "jti", "typ"]
 
 # Library defaults are the RFC 9106 recommended Argon2id parameters.
 _hasher = PasswordHasher()
-# Verified for unknown users so the response time matches a real check.
-_DUMMY_HASH: Final = _hasher.hash("dummy-password-for-timing-equalisation")
+
+
+@cache
+def _dummy_hash() -> str:
+    """Verified for unknown users so the response time matches a real
+    check. Built on first use (in a hash thread), not at import."""
+    return _hasher.hash("dummy-password-for-timing-equalisation")
 
 
 def validate_password_policy(password: str) -> None:
@@ -43,8 +49,8 @@ def validate_password_policy(password: str) -> None:
 
 
 # Each Argon2id run uses ~64 MiB, so unbounded parallel logins could exhaust
-# memory and the default thread pool. There is still no per-account or
-# per-IP rate limiting (see the README).
+# memory and the default thread pool. Per-account and per-address limits
+# are the throttle's job (``components.auth.throttle``).
 HASH_CONCURRENCY_LIMIT: Final = 4
 _hash_slots: tuple[asyncio.AbstractEventLoop, asyncio.Semaphore] | None = None
 
@@ -60,8 +66,28 @@ def _hash_semaphore() -> asyncio.Semaphore:
 
 
 async def _run_bounded[T](func: Callable[..., T], *args: object) -> T:
-    async with _hash_semaphore():
-        return await asyncio.to_thread(func, *args)
+    """Run ``func`` in a thread while holding one of the hash slots.
+
+    A thread cannot be cancelled. When the awaiting caller is cancelled the
+    computation keeps running, so the slot is released by the task's done
+    callback and not when the caller leaves: capacity (memory) stays
+    accounted for until the work really ends.
+    """
+    semaphore = _hash_semaphore()
+    await semaphore.acquire()
+    try:
+        task = asyncio.ensure_future(asyncio.to_thread(func, *args))
+    except BaseException:
+        semaphore.release()
+        raise
+
+    def release(done: "asyncio.Future[T]") -> None:
+        if not done.cancelled():
+            done.exception()  # retrieved: nobody awaits it after a cancel
+        semaphore.release()
+
+    task.add_done_callback(release)
+    return await asyncio.shield(task)
 
 
 async def hash_password(password: str) -> str:
@@ -76,13 +102,17 @@ def _verify(password_hash: str, password: str) -> bool:
         return False
 
 
+def _verify_dummy(password: str) -> bool:
+    return _verify(_dummy_hash(), password)
+
+
 async def verify_password(password_hash: str, password: str) -> bool:
     return await _run_bounded(_verify, password_hash, password)
 
 
 async def verify_dummy_password(password: str) -> None:
     """Spend the cost of a verification for an unknown user; always fails."""
-    await _run_bounded(_verify, _DUMMY_HASH, password)
+    await _run_bounded(_verify_dummy, password)
 
 
 def password_needs_rehash(password_hash: str) -> bool:
@@ -173,11 +203,11 @@ def create_refresh_token(
 
 def _uuid_claim(value: object) -> uuid.UUID:
     if not isinstance(value, str):
-        raise InvalidTokenError("invalid token")
+        raise TokenInvalidError("invalid token")
     try:
         return uuid.UUID(value)
     except ValueError:
-        raise InvalidTokenError("invalid token") from None
+        raise TokenInvalidError("invalid token") from None
 
 
 def decode_token(
@@ -193,7 +223,7 @@ def decode_token(
     verified as usual.
 
     The algorithm list is pinned, so ``alg: none`` and algorithm confusion
-    are rejected. Raises ``ExpiredTokenError`` or ``InvalidTokenError``.
+    are rejected. Raises ``TokenExpiredError`` or ``TokenInvalidError``.
     """
     try:
         claims = jwt.decode(
@@ -201,18 +231,19 @@ def decode_token(
             settings.jwt_secret_key.get_secret_value(),
             algorithms=[JWT_ALGORITHM],
             issuer=settings.jwt_issuer,
+            leeway=settings.jwt_leeway_seconds,
             options={"require": _REQUIRED_CLAIMS, "verify_exp": verify_expiry},
         )
     except jwt.ExpiredSignatureError:
-        raise ExpiredTokenError("token expired") from None
+        raise TokenExpiredError("token expired") from None
     except jwt.PyJWTError:
-        raise InvalidTokenError("invalid token") from None
+        raise TokenInvalidError("invalid token") from None
 
     if claims["typ"] != expected_type.value:
-        raise InvalidTokenError("invalid token")
+        raise TokenInvalidError("invalid token")
     jti = claims["jti"]
     if not isinstance(jti, str) or not jti:
-        raise InvalidTokenError("invalid token")
+        raise TokenInvalidError("invalid token")
     family_id = None
     if expected_type is TokenType.REFRESH:
         family_id = _uuid_claim(claims.get("fam"))

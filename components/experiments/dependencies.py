@@ -10,5 +10,8 @@ def build_experiment_service(
     session: AsyncSession,
     llm_service: LLMService,
     enqueue: EnqueueResults,
+    max_active_experiments: int | None = None,
 ) -> ExperimentService:
-    return ExperimentService(session, llm_service, enqueue)
+    return ExperimentService(
+        session, llm_service, enqueue, max_active_experiments
+    )

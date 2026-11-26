@@ -10,8 +10,11 @@ from sqlalchemy import Table, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from components.auth.models import RefreshToken
-from components.auth.repository import RefreshTokenRepository
+from components.auth.models import AuthThrottle, RefreshToken
+from components.auth.repository import (
+    AuthThrottleRepository,
+    RefreshTokenRepository,
+)
 from components.auth.security import hash_token_id
 from components.core.database import Base, create_engine
 from components.core.enums import Role
@@ -21,7 +24,7 @@ from components.users.models import User
 from components.users.repository import UserRepository
 from tests.helpers import checked_database_url
 
-_MODELS = (Organization, User, RefreshToken)
+_MODELS = (Organization, User, RefreshToken, AuthThrottle)
 
 
 @pytest.fixture
@@ -298,3 +301,57 @@ async def test_deleting_user_cascades_to_tokens(session: AsyncSession) -> None:
 
     remaining = await session.scalars(select(RefreshToken))
     assert remaining.all() == []
+
+
+# --- purge ---------------------------------------------------------------
+
+
+async def test_purge_expired_deletes_only_long_expired_tokens(
+    session: AsyncSession,
+) -> None:
+    org = await OrganizationRepository(session).create("purge-org")
+    user = await UserRepository(session).create(
+        "p@example.com", "x", Role.STAFF, org.id
+    )
+    repo = RefreshTokenRepository(session)
+    now = datetime.now(UTC)
+    family = uuid.uuid4()
+    for name, delta in (
+        ("old", timedelta(days=-30)),
+        ("recent", timedelta(days=-1)),
+        ("live", timedelta(days=1)),
+    ):
+        await repo.create(user.id, family, name.ljust(64, "0"), now + delta)
+
+    deleted = await repo.purge_expired(timedelta(days=7))
+
+    assert deleted == 1
+    left = (await session.scalars(select(RefreshToken.token_hash))).all()
+    assert sorted(h[:6] for h in left) == ["live00", "recent"]
+
+
+async def test_throttle_purge_stale_keeps_active_rows(
+    session: AsyncSession,
+) -> None:
+    repo = AuthThrottleRepository(session)
+    window = timedelta(seconds=60)
+    await repo.record_failure("account", "a" * 64, 5, window)
+    await repo.record_failure("account", "b" * 64, 1, window)  # locked
+    await repo.record_failure("account", "c" * 64, 5, window)
+    past = datetime.now(UTC) - timedelta(hours=1)
+    await session.execute(
+        AuthThrottle.__table__.update()  # type: ignore[attr-defined]
+        .where(AuthThrottle.key_hash.in_(["a" * 64, "b" * 64]))
+        .values(window_started_at=past)
+    )
+    await session.execute(
+        AuthThrottle.__table__.update()  # type: ignore[attr-defined]
+        .where(AuthThrottle.key_hash == "b" * 64)
+        .values(locked_until=datetime.now(UTC) + timedelta(hours=1))
+    )
+
+    deleted = await repo.purge_stale(window)
+
+    assert deleted == 1  # only "a": window over and no active lock
+    left = (await session.scalars(select(AuthThrottle.key_hash))).all()
+    assert sorted(h[0] for h in left) == ["b", "c"]

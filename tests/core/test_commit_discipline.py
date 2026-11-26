@@ -28,6 +28,7 @@ from components.experiments.enums import ExperimentStatus
 from components.experiments.models import Experiment
 from components.organizations.dependencies import build_organization_service
 from components.organizations.models import Organization
+from components.organizations.service import OrganizationService
 from components.users.dependencies import build_user_service
 from tests.access import PASSWORD, ROOT, Actors, Factory
 from tests.experiments.helpers import (
@@ -409,7 +410,7 @@ async def test_one_commit_per_write_operation(
         )
 
     async def create_organization(session: AsyncSession) -> None:
-        await build_organization_service(session).create("new organization")
+        await _organizations(session, settings).create("new organization")
 
     async def create_user(session: AsyncSession) -> None:
         auth = build_auth_service(session, settings)
@@ -429,7 +430,7 @@ async def test_one_commit_per_write_operation(
         )
 
     async def update_organization(session: AsyncSession) -> None:
-        await build_organization_service(session).update(
+        await _organizations(session, settings).update(
             actors.org_id, is_active=True
         )
 
@@ -450,7 +451,11 @@ async def test_one_commit_per_write_operation(
     ]
     for operation in operations:
         count = await _count_commits(commit_log, operation, session_factory)
-        assert count == 1, operation.__name__
+        # Login commits twice on purpose: the attempt is counted and
+        # committed before the slow password hash (a parallel burst cannot
+        # outrun the lockout), then the operation's own commit.
+        expected = 2 if operation is login else 1
+        assert count == expected, operation.__name__
     assert superadmin.role is Role.SUPERADMIN
 
 
@@ -485,13 +490,22 @@ async def test_refresh_reuse_persists_the_revocation_then_rejects(
         assert rows and all(row.revoked_at is not None for row in rows)
 
 
+def _organizations(
+    session: AsyncSession, settings: SettingsSchema
+) -> OrganizationService:
+    auth = build_auth_service(session, settings)
+    return build_organization_service(
+        session, auth.revoke_organization_sessions
+    )
+
+
 async def test_organization_service_sees_no_commit_without_a_scope(
-    session_factory: Factory,
+    session_factory: Factory, settings: SettingsSchema
 ) -> None:
     """Services never commit: without the entry point's scope nothing is
     stored."""
     async with session_factory() as session:
-        await build_organization_service(session).create("not committed")
+        await _organizations(session, settings).create("not committed")
     async with session_factory() as session:
         names = (await session.scalars(select(Organization.name))).all()
     assert "not committed" not in names

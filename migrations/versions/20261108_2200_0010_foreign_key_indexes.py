@@ -1,7 +1,7 @@
 """index the foreign keys used to find experiments and results of a case
 
 Revision ID: 0010
-Revises: 0007
+Revises: 0008
 Create Date: 2026-11-08 22:00:00.000000
 
 ``experiments.dataset_id`` and ``experiment_results.test_case_id`` are
@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "0010"
-down_revision: str | None = "0007"
+down_revision: str | None = "0008"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

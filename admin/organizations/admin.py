@@ -7,6 +7,8 @@ from typing import Any
 from fastadmin import AdminApiException, register
 
 from admin.core import ReadOnlyScopedAdmin, principal_of
+from components.auth.dependencies import build_auth_service
+from components.core.config import get_settings
 from components.core.database import session_scope
 from components.core.enums import Role
 from components.organizations.dependencies import build_organization_service
@@ -55,9 +57,10 @@ class OrganizationAdmin(ReadOnlyScopedAdmin):
             # The scope commits on exit, before the read below uses another
             # session.
             async with session_scope() as session:
-                await build_organization_service(session).update(
-                    organization_id, is_active=is_active
-                )
+                auth = build_auth_service(session, get_settings())
+                await build_organization_service(
+                    session, auth.revoke_organization_sessions
+                ).update(organization_id, is_active=is_active)
         except OrganizationNotFoundError:
             return None
         result: dict[str, Any] | None = await self.orm_serialize_obj_by_id(

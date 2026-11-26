@@ -1,7 +1,15 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CHAR, DateTime, ForeignKey, Index, func
+from sqlalchemy import (
+    CHAR,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from components.core.database import Base
@@ -19,6 +27,7 @@ class RefreshToken(Base):
     __table_args__ = (
         Index("ix_refresh_tokens_family_id", "family_id"),
         Index("ix_refresh_tokens_user_id", "user_id"),
+        Index("ix_refresh_tokens_expires_at", "expires_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -37,4 +46,22 @@ class RefreshToken(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AuthThrottle(Base):
+    """Failed sign-in counter of one account or client address. Only a
+    SHA-256 of the identifier is stored, never the email or the address."""
+
+    __tablename__ = "auth_throttle"
+
+    # ``ThrottleScope`` value.
+    scope: Mapped[str] = mapped_column(String(16), primary_key=True)
+    key_hash: Mapped[str] = mapped_column(CHAR(64), primary_key=True)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    window_started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
     )

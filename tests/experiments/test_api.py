@@ -12,6 +12,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.v1.endpoints.experiments import get_enqueue, get_llm_service
+from api.v1.utils import get_settings_dependency
+from components.core.config import SettingsSchema
 from components.core.database import get_session, session_scope
 from components.core.schemas import Principal
 from components.experiments.models import Experiment, ExperimentResult
@@ -745,3 +747,29 @@ async def test_unauthenticated_requests_are_401(
         ):
             response = await getattr(anonymous, method)(path)
             assert response.status_code == 401, (method, path)
+
+
+async def test_start_over_the_organization_limit_is_429(
+    app: FastAPI,
+    client: AsyncClient,
+    session_factory: Factory,
+    enqueued: Enqueued,
+    owner: Principal,
+    settings: SettingsSchema,
+) -> None:
+    limited = settings.model_copy(
+        update={"max_active_experiments_per_organization": 1}
+    )
+    app.dependency_overrides[get_settings_dependency] = lambda: limited
+    first = await _create(client, session_factory, 1, owner)
+    second = await _create(client, session_factory, 1, owner)
+    assert (await client.post(f"{URL}/{first}/start")).status_code == 202
+    enqueued.batches.clear()
+
+    response = await client.post(f"{URL}/{second}/start")
+
+    assert response.status_code == 429
+    assert "1 active experiments" in response.json()["detail"]
+    assert enqueued.flat == []
+    got = (await client.get(f"{URL}/{second}")).json()
+    assert got["status"] == "pending"

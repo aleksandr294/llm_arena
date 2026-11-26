@@ -13,9 +13,9 @@ from argon2 import PasswordHasher
 from components.auth import security
 from components.auth.enums import TokenType
 from components.auth.exceptions import (
-    ExpiredTokenError,
-    InvalidTokenError,
     PasswordPolicyError,
+    TokenExpiredError,
+    TokenInvalidError,
 )
 from components.auth.security import (
     create_access_token,
@@ -77,8 +77,8 @@ async def test_dummy_verification_runs_one_verification_against_the_dummy_hash(
     await verify_dummy_password(PASSWORD)
     # One verification of the password against the fixed dummy hash, which
     # is a valid hash (so the full Argon2 cost is paid) that never matches.
-    assert calls == [(security._DUMMY_HASH, PASSWORD)]
-    assert await verify_password(security._DUMMY_HASH, PASSWORD) is False
+    assert calls == [(security._dummy_hash(), PASSWORD)]
+    assert await verify_password(security._dummy_hash(), PASSWORD) is False
 
 
 async def test_current_hash_does_not_need_rehash() -> None:
@@ -156,14 +156,14 @@ def test_expired_token_is_rejected() -> None:
     past = datetime.now(UTC) - timedelta(hours=2)
     issued = create_access_token(settings, uuid.uuid4(), now=past)
 
-    with pytest.raises(ExpiredTokenError):
+    with pytest.raises(TokenExpiredError):
         decode_token(settings, issued.token, TokenType.ACCESS)
 
 
 def test_wrong_issuer_is_rejected() -> None:
     issued = create_access_token(_settings(jwt_issuer="other"), uuid.uuid4())
 
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(_settings(), issued.token, TokenType.ACCESS)
 
 
@@ -171,7 +171,7 @@ def test_wrong_signing_key_is_rejected() -> None:
     other = _settings(jwt_secret_key="another-signing-key-0123456789abcdefgh")
     issued = create_access_token(other, uuid.uuid4())
 
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(_settings(), issued.token, TokenType.ACCESS)
 
 
@@ -186,7 +186,7 @@ def test_tampered_payload_is_rejected() -> None:
         base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
     )
 
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(
             settings, f"{header}.{forged}.{signature}", TokenType.ACCESS
         )
@@ -208,7 +208,7 @@ def test_algorithm_none_is_rejected() -> None:
         algorithm="none",
     )
 
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(settings, unsigned, TokenType.ACCESS)
 
 
@@ -228,7 +228,7 @@ def test_other_hmac_algorithm_is_rejected() -> None:
         algorithm="HS512",
     )
 
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(settings, token, TokenType.ACCESS)
 
 
@@ -238,9 +238,9 @@ def test_wrong_token_type_is_rejected_both_ways() -> None:
     access = create_access_token(settings, user_id).token
     refresh = create_refresh_token(settings, user_id, uuid.uuid4()).token
 
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(settings, refresh, TokenType.ACCESS)
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(settings, access, TokenType.REFRESH)
 
 
@@ -259,7 +259,7 @@ def test_missing_required_claim_is_rejected(missing: str) -> None:
     del payload[missing]
     token = jwt.encode(payload, SECRET, algorithm="HS256")
 
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(settings, token, TokenType.ACCESS)
 
 
@@ -281,15 +281,15 @@ def test_refresh_without_family_or_bad_subject_is_rejected() -> None:
         algorithm="HS256",
     )
 
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(settings, no_family, TokenType.REFRESH)
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(settings, bad_sub, TokenType.REFRESH)
 
 
 @pytest.mark.parametrize("token", ["", "garbage", "a.b.c"])
 def test_garbage_is_rejected(token: str) -> None:
-    with pytest.raises(InvalidTokenError):
+    with pytest.raises(TokenInvalidError):
         decode_token(_settings(), token, TokenType.ACCESS)
 
 
@@ -297,7 +297,7 @@ def test_errors_do_not_leak_token_or_secret() -> None:
     settings = _settings()
     token = create_access_token(settings, uuid.uuid4()).token
 
-    with pytest.raises(InvalidTokenError) as exc:
+    with pytest.raises(TokenInvalidError) as exc:
         decode_token(_settings(jwt_issuer="other"), token, TokenType.ACCESS)
 
     assert token not in str(exc.value)
@@ -319,7 +319,7 @@ def test_decode_without_expiry_check_accepts_expired_refresh_token() -> None:
         settings, uuid.uuid4(), uuid.uuid4(), now=past
     )
 
-    with pytest.raises(ExpiredTokenError):
+    with pytest.raises(TokenExpiredError):
         decode_token(settings, issued.token, TokenType.REFRESH)
     claims = decode_token(
         settings, issued.token, TokenType.REFRESH, verify_expiry=False
@@ -349,7 +349,7 @@ def test_decode_without_expiry_check_still_verifies_the_rest() -> None:
     )
     wrong_type = create_access_token(settings, user_id, now=past)
     for token in (forged, other_issuer.token, wrong_type.token, "garbage"):
-        with pytest.raises(InvalidTokenError):
+        with pytest.raises(TokenInvalidError):
             decode_token(
                 settings, token, TokenType.REFRESH, verify_expiry=False
             )
@@ -394,3 +394,97 @@ def test_semaphore_works_under_several_event_loops(
     for _ in range(2):
         peak = asyncio.run(_max_concurrency(monkeypatch))
         assert peak == security.HASH_CONCURRENCY_LIMIT
+
+
+# --- clock-skew leeway ---------------------------------------------------
+
+
+def _expired_ago(seconds: int, settings: SettingsSchema) -> str:
+    """An access token whose ``exp`` was ``seconds`` ago."""
+    issued = datetime.now(UTC) - timedelta(
+        seconds=settings.jwt_access_ttl_seconds + seconds
+    )
+    return create_access_token(settings, uuid.uuid4(), now=issued).token
+
+
+def test_token_expired_within_leeway_is_accepted() -> None:
+    settings = _settings(jwt_leeway_seconds=5)
+
+    claims = decode_token(settings, _expired_ago(2, settings), TokenType.ACCESS)
+
+    assert claims.token_type is TokenType.ACCESS
+
+
+def test_token_expired_beyond_leeway_is_rejected() -> None:
+    settings = _settings(jwt_leeway_seconds=5)
+
+    with pytest.raises(TokenExpiredError):
+        decode_token(settings, _expired_ago(10, settings), TokenType.ACCESS)
+
+
+def test_zero_leeway_is_strict() -> None:
+    settings = _settings(jwt_leeway_seconds=0)
+
+    with pytest.raises(TokenExpiredError):
+        decode_token(settings, _expired_ago(2, settings), TokenType.ACCESS)
+
+
+def test_issue_time_in_the_future_follows_the_leeway() -> None:
+    settings = _settings(jwt_leeway_seconds=5)
+    soon = datetime.now(UTC) + timedelta(seconds=2)
+    later = datetime.now(UTC) + timedelta(seconds=30)
+
+    decode_token(
+        settings,
+        create_access_token(settings, uuid.uuid4(), now=soon).token,
+        TokenType.ACCESS,
+    )
+    with pytest.raises(TokenInvalidError):
+        decode_token(
+            settings,
+            create_access_token(settings, uuid.uuid4(), now=later).token,
+            TokenType.ACCESS,
+        )
+
+
+# --- hash slots ----------------------------------------------------------
+
+
+async def test_cancelled_hash_keeps_its_slot_until_the_thread_ends() -> None:
+    release = threading.Event()
+    started = threading.Semaphore(0)
+
+    def blocker() -> int:
+        started.release()
+        release.wait(10)
+        return 1
+
+    holders = [
+        asyncio.create_task(security._run_bounded(blocker))
+        for _ in range(security.HASH_CONCURRENCY_LIMIT)
+    ]
+    for _ in holders:
+        assert await asyncio.to_thread(started.acquire, True, 5)
+    waiting = asyncio.create_task(security._run_bounded(lambda: "done"))
+    await asyncio.sleep(0.05)
+    assert not waiting.done()  # every slot is taken
+
+    for holder in holders:
+        holder.cancel()
+    await asyncio.gather(*holders, return_exceptions=True)
+    await asyncio.sleep(0.1)
+    assert not waiting.done()  # cancelled, but the threads still run
+
+    release.set()
+    assert await asyncio.wait_for(waiting, 5) == "done"
+
+
+async def test_dummy_hash_is_built_lazily_and_once() -> None:
+    security._dummy_hash.cache_clear()
+    assert security._dummy_hash.cache_info().currsize == 0
+
+    await verify_dummy_password("whatever")
+    await verify_dummy_password("whatever")
+
+    info = security._dummy_hash.cache_info()
+    assert info.currsize == 1 and info.misses == 1

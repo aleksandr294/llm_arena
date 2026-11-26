@@ -2,8 +2,13 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from components.organizations.service import OrganizationService
+from components.organizations.service import (
+    OrganizationService,
+    RevokeSessions,
+)
 
 
-def build_organization_service(session: AsyncSession) -> OrganizationService:
-    return OrganizationService(session)
+def build_organization_service(
+    session: AsyncSession, revoke_sessions: RevokeSessions
+) -> OrganizationService:
+    return OrganizationService(session, revoke_sessions)

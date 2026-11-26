@@ -208,7 +208,7 @@ def test_leaf_checker_flags_deliberate_violations() -> None:
     [
         (UserService, {"session", "auth_service"}),
         (ExperimentService, {"session", "llm_service", "enqueue"}),
-        (AuthService, {"session"}),
+        (AuthService, {"session", "settings", "throttle"}),
         (LLMService, {"settings"}),
     ],
 )

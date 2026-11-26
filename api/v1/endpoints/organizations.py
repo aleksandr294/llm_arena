@@ -8,9 +8,12 @@ from api.v1.utils import (
     Limit,
     Offset,
     SessionDep,
+    get_auth_service,
     get_principal,
     not_found,
 )
+from components.auth.service import AuthService
+from components.core.access import log_access_denied
 from components.core.enums import Role
 from components.core.schemas import Principal
 from components.organizations.dependencies import build_organization_service
@@ -31,6 +34,7 @@ async def require_superadmin(
     principal: Annotated[Principal, Depends(get_principal)],
 ) -> Principal:
     if principal.role is not Role.SUPERADMIN:
+        log_access_denied(principal, "role")
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Forbidden")
     return principal
 
@@ -43,8 +47,13 @@ router = APIRouter(
 )
 
 
-def get_organization_service(session: SessionDep) -> OrganizationService:
-    return build_organization_service(session)
+def get_organization_service(
+    session: SessionDep,
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+) -> OrganizationService:
+    return build_organization_service(
+        session, auth_service.revoke_organization_sessions
+    )
 
 
 ServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]

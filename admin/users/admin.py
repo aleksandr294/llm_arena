@@ -14,13 +14,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin.core import ReadOnlyScopedAdmin
 from admin.schemas import SessionUser
+from components.auth.dependencies import build_auth_throttle_service
+from components.auth.enums import ThrottleScope
+from components.auth.exceptions import AuthThrottledError
 from components.auth.security import (
     PASSWORD_MAX_LENGTH,
     verify_dummy_password,
     verify_password,
 )
+from components.auth.throttle import account_key
+from components.core.config import get_settings
 from components.core.database import session_scope
 from components.core.enums import Role
+from components.core.logging import log_security_event
 from components.core.schemas import Principal
 from components.organizations.repository import OrganizationRepository
 from components.users.models import User
@@ -71,20 +77,45 @@ class UserAdmin(ReadOnlyScopedAdmin):
     ) -> uuid.UUID | None:
         """Id of the active user of an active organization whose password
         matches. Every failure is the same ``None``: the caller learns
-        neither whether the email exists nor why sign-in failed."""
+        neither whether the email exists nor why sign-in failed. Failed
+        attempts per username are throttled; the panel gives no client
+        address, so only the account counter applies (scope ``admin``)."""
+        key = account_key(username, ThrottleScope.ADMIN)
+        settings = get_settings()
         # An unscoped, short session: nobody is signed in yet, and the
         # connection is released before the slow Argon2id verification.
         async with session_scope() as session:
+            try:
+                # Counted before the password check (see AuthService.login);
+                # this scope commits on exit, before the slow hash.
+                await build_auth_throttle_service(
+                    session, settings
+                ).begin_attempt(key)
+            except AuthThrottledError:
+                log_security_event(
+                    "auth.locked_out", outcome="denied", reason="admin"
+                )
+                return None
             user = await UserRepository(session).get_by_email(username.strip())
             password_hash = user.password_hash if user is not None else None
             principal = await _active_principal(session, user)
 
         if password_hash is None or len(password) > PASSWORD_MAX_LENGTH:
             await verify_dummy_password(password)
-            return None
-        if not await verify_password(password_hash, password):
-            return None
-        return principal.user_id if principal is not None else None
+            verified = False
+        else:
+            verified = await verify_password(password_hash, password)
+        user_id = principal.user_id if verified and principal else None
+        if user_id is not None:
+            async with session_scope() as session:
+                await build_auth_throttle_service(session, settings).reset(key)
+        log_security_event(
+            "admin.sign_in",
+            user_id=user_id,
+            outcome="success" if user_id is not None else "denied",
+            reason=None if user_id is not None else "invalid_credentials",
+        )
+        return user_id
 
     def set_context(
         self, request: Any | None = None, user: Any | None = None

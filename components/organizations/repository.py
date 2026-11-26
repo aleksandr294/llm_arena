@@ -17,6 +17,17 @@ class OrganizationRepository(BaseRepository[Organization]):
             )
         )
 
+    async def get_for_update(
+        self, organization_id: uuid.UUID
+    ) -> Organization | None:
+        """Lock the organization row and refresh it."""
+        return await self.session.scalar(
+            select(Organization)
+            .where(Organization.id == organization_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
     async def get_by_name(self, name: str) -> Organization | None:
         """Look up by name ignoring case."""
         return await self.session.scalar(

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from components.auth.exceptions import PasswordPolicyError
 from components.auth.security import hash_password, validate_password_policy
 from components.auth.service import AuthService
+from components.core.access import log_access_denied
 from components.core.enums import Role
 from components.core.schemas import Principal
 from components.organizations.repository import OrganizationRepository
@@ -46,15 +47,7 @@ class UserService:
         if await self.users.get_by_email(email) is not None:
             raise DuplicateEmailError
         password_hash = await hash_password(password)
-        try:
-            user = await self.users.create(
-                email, password_hash, Role.SUPERADMIN, None
-            )
-        except IntegrityError:
-            # Lost a race against a concurrent insert of the same email.
-            await self.session.rollback()
-            raise DuplicateEmailError from None
-        return user
+        return await self._insert(email, password_hash, Role.SUPERADMIN, None)
 
     # --- management (HTTP) --------------------------------------------------
 
@@ -69,18 +62,19 @@ class UserService:
         """Raises ``UserForbiddenError``, ``UserInputError`` or
         ``DuplicateEmailError``. Superadmins are never created over HTTP."""
         if caller.role is Role.STAFF:
-            raise UserForbiddenError
+            raise self._forbidden(caller, "role")
         if role is Role.SUPERADMIN:
-            if caller.role is not Role.SUPERADMIN:
-                raise UserForbiddenError
-            if organization_id is not None:
+            # Superadmins are created by the CLI only, whoever asks; the
+            # one answer that differs keeps the 422 for a superadmin caller
+            # who also names an organization.
+            if caller.role is Role.SUPERADMIN and organization_id is not None:
                 raise UserInputError(
                     "organization_id", "a superadmin has no organization"
                 )
-            raise UserForbiddenError
+            raise self._forbidden(caller, "superadmin_creation")
         if caller.role is Role.ADMIN:
             if organization_id not in (None, caller.organization_id):
-                raise UserForbiddenError
+                raise self._forbidden(caller, "organization")
             organization_id = caller.organization_id
         elif organization_id is None:
             raise UserInputError(
@@ -95,14 +89,25 @@ class UserService:
         if await self.users.get_by_email(email) is not None:
             raise DuplicateEmailError
         password_hash = await hash_password(password)
+        return await self._insert(email, password_hash, role, organization_id)
+
+    async def _insert(
+        self,
+        email: str,
+        password_hash: str,
+        role: Role,
+        organization_id: uuid.UUID | None,
+    ) -> User:
+        """Insert inside a SAVEPOINT: losing a race against a concurrent
+        insert of the same email undoes only this insert, not the caller's
+        other pending changes."""
         try:
-            user = await self.users.create(
-                email, password_hash, role, organization_id
-            )
+            async with self.session.begin_nested():
+                return await self.users.create(
+                    email, password_hash, role, organization_id
+                )
         except IntegrityError:
-            await self.session.rollback()
             raise DuplicateEmailError from None
-        return user
 
     async def list_users(
         self,
@@ -142,10 +147,14 @@ class UserService:
         ``UserConflictError`` or ``UserInputError``. Deactivation and a
         password change end the user's sessions in the same transaction."""
         if caller.role is Role.STAFF:
-            raise UserForbiddenError
-        user = await self.get_user(caller, user_id)
+            raise self._forbidden(caller, "role")
+        # Locked so concurrent updates of one user apply one after the other
+        # (each on top of the previous), and so a refresh waits for us.
+        user = await self.users.get_for_update(user_id)
+        if user is None or not self._in_scope(caller, user):
+            raise UserNotFoundError
         if user.role == Role.SUPERADMIN:
-            raise UserForbiddenError
+            raise self._forbidden(caller, "superadmin_target")
         if user.id == caller.user_id:
             if role is not None and role.value != user.role:
                 raise UserConflictError("you cannot change your own role")
@@ -161,6 +170,11 @@ class UserService:
         if password is not None or is_active is False:
             await self.auth.revoke_all_sessions(user.id)
         return user
+
+    @staticmethod
+    def _forbidden(caller: Principal, reason: str) -> UserForbiddenError:
+        log_access_denied(caller, reason)
+        return UserForbiddenError()
 
     @staticmethod
     def _in_scope(caller: Principal, user: User) -> bool:

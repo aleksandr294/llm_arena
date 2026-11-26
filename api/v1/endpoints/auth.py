@@ -1,10 +1,16 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 
 from api.v1.docs import errors
-from api.v1.utils import get_auth_service, unauthorized
+from api.v1.utils import (
+    client_address,
+    get_auth_service,
+    throttled,
+    unauthorized,
+)
 from components.auth.exceptions import (
+    AuthThrottledError,
     InvalidCredentialsError,
     InvalidRefreshTokenError,
 )
@@ -35,15 +41,21 @@ def _pair(pair: TokenPair) -> TokenPairSchema:
     response_model=TokenPairSchema,
     summary="Sign in",
     description="Exchange email and password for an access and refresh token.",
-    responses=errors(401),
+    responses=errors(401, 429),
 )
 async def login(
-    body: LoginRequestSchema, service: ServiceDep
+    body: LoginRequestSchema, service: ServiceDep, request: Request
 ) -> TokenPairSchema:
     try:
-        return _pair(await service.login(body.email, body.password))
+        return _pair(
+            await service.login(
+                body.email, body.password, client_address(request)
+            )
+        )
     except InvalidCredentialsError:
         raise unauthorized("Invalid credentials") from None
+    except AuthThrottledError as exc:
+        raise throttled(exc) from None
 
 
 @router.post(
@@ -51,15 +63,19 @@ async def login(
     response_model=TokenPairSchema,
     summary="Refresh tokens",
     description="Rotate a refresh token; the old one stops working.",
-    responses=errors(401),
+    responses=errors(401, 429),
 )
 async def refresh(
-    body: RefreshRequestSchema, service: ServiceDep
+    body: RefreshRequestSchema, service: ServiceDep, request: Request
 ) -> TokenPairSchema:
     try:
-        return _pair(await service.refresh(body.refresh_token))
+        return _pair(
+            await service.refresh(body.refresh_token, client_address(request))
+        )
     except InvalidRefreshTokenError:
         raise unauthorized("Invalid refresh token") from None
+    except AuthThrottledError as exc:
+        raise throttled(exc) from None
 
 
 @router.post(
@@ -82,14 +98,19 @@ async def logout(body: RefreshRequestSchema, service: ServiceDep) -> Response:
     response_model=ValidationResultSchema,
     summary="Validate an access token",
     description=(
-        "Always answers 200; an unusable token is reported in the body."
+        "Answers 200; an unusable token is reported in the body. A client "
+        "address with too many unusable tokens is answered 429."
     ),
+    responses=errors(429),
 )
 async def validate(
-    body: ValidateRequestSchema, service: ServiceDep
+    body: ValidateRequestSchema, service: ServiceDep, request: Request
 ) -> ValidationResultSchema:
-    """Always 200: an unusable token is reported in the body."""
-    result = await service.validate(body.token)
+    """200 with the verdict in the body, 429 for a locked client address."""
+    try:
+        result = await service.validate(body.token, client_address(request))
+    except AuthThrottledError as exc:
+        raise throttled(exc) from None
     return ValidationResultSchema(
         valid=result.valid,
         user_id=result.user_id,

@@ -40,8 +40,8 @@ pulling a change that adds a revision.
 | `0009` | Index `ix_experiment_results_export_order` (tech-debt-experiment-pipeline) | Drops the index |
 | `0010` | Indexes `ix_experiments_dataset_id` and `ix_experiment_results_test_case_id` | Drops the indexes; no data change |
 
-`0008` and `0009` arrive with their own changes; a checkout without them
-goes from `0007` straight to `0010`. Creating the `0010` indexes takes a
+`0009` arrives with its own change; until it merges, `0010` follows
+`0008` directly. Creating the `0010` indexes takes a
 short write lock on `experiments` and `experiment_results`: apply it between
 experiment runs.
 

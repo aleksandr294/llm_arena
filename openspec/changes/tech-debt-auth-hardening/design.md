@@ -69,10 +69,17 @@ ordering constraint.
    `key_hash`); scopes `account` (SHA-256 of normalized email, so unknown
    emails are throttled identically and no raw email is stored) and `address`
    (hash of `request.client.host`). Settings: `auth_max_failed_attempts`
-   (default 5), `auth_lockout_seconds` (default 900; also the counting
-   window). A failure is recorded with an atomic upsert and committed before
-   the 401 is raised (persist-then-reject, as in refresh reuse), because the
-   request fails. `AuthThrottle` is a repository + small service in
+   (default 5, per account), `auth_max_failed_attempts_per_address` (default
+   50, because many users can share one address), `auth_lockout_seconds`
+   (default 900; also the counting window). The account counter is
+   incremented atomically *before* the password check and committed before
+   Argon2 starts (a locked key is refused without counting), and reset on
+   success, so a parallel burst cannot verify more guesses than the
+   threshold. The address counter (login, refresh, validate) is recorded
+   after a failure with the same upsert and committed before the 401 is
+   raised (persist-then-reject, as in refresh reuse), because the request
+   fails. `/auth/validate` does not count `expired` tokens (normal gateway
+   traffic), only `invalid` and `revoked`. `AuthThrottle` is a repository + small service in
    `components/auth`, built in `build_auth_service` via the existing
    constructor; the address is passed in by the endpoint (services never read
    HTTP). 429 with `Retry-After` comes from a new `AuthThrottledError`.
@@ -90,7 +97,7 @@ ordering constraint.
    `components/core/access.py` where the denial is decided.
 9. **Active-experiment cap** `max_active_experiments_per_organization`
    (default 20, `ge=1`), checked in `ExperimentService.start` against a count
-   query (`pending` or `running` statuses of the organization), answering a new
+   query (`running` status of the organization; `pending` experiments are created but not started, so they are not active, and `retry-failed` is checked the same way), answering a new
    `ExperimentQuotaError` mapped to 429. Count and start happen in one
    transaction after locking the organization row, so concurrent starts cannot
    overshoot.
