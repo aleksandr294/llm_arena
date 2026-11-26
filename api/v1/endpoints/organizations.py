@@ -1,10 +1,17 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.v1.docs import errors
-from api.v1.utils import SessionDep, get_auth_service, get_principal
+from api.v1.utils import (
+    Limit,
+    Offset,
+    SessionDep,
+    get_auth_service,
+    get_principal,
+    not_found,
+)
 from components.auth.service import AuthService
 from components.core.access import log_access_denied
 from components.core.enums import Role
@@ -21,9 +28,6 @@ from components.organizations.schemas import (
     OrganizationUpdateSchema,
 )
 from components.organizations.service import OrganizationService
-
-Limit = Annotated[int, Query(ge=1, le=100)]
-Offset = Annotated[int, Query(ge=0)]
 
 
 async def require_superadmin(
@@ -53,10 +57,6 @@ def get_organization_service(
 
 
 ServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
-
-
-def _not_found() -> HTTPException:
-    return HTTPException(status.HTTP_404_NOT_FOUND, "Organization not found")
 
 
 def _conflict() -> HTTPException:
@@ -117,7 +117,7 @@ async def get_organization(
             await service.get(organization_id)
         )
     except OrganizationNotFoundError:
-        raise _not_found() from None
+        raise not_found("Organization not found") from None
 
 
 @router.patch(
@@ -139,7 +139,7 @@ async def update_organization(
             organization_id, body.name, body.is_active
         )
     except OrganizationNotFoundError:
-        raise _not_found() from None
+        raise not_found("Organization not found") from None
     except DuplicateOrganizationNameError:
         raise _conflict() from None
     return OrganizationSchema.model_validate(organization)

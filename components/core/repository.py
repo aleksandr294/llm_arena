@@ -1,7 +1,5 @@
-from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.core.database import Base
@@ -18,12 +16,6 @@ class BaseRepository[ModelT: Base]:
 
     async def get(self, entity_id: Any) -> ModelT | None:
         return await self.session.get(self.model, entity_id)
-
-    async def list(self, limit: int = 100, offset: int = 0) -> Sequence[ModelT]:
-        result = await self.session.scalars(
-            select(self.model).limit(limit).offset(offset)
-        )
-        return result.all()
 
     async def add(self, entity: ModelT) -> ModelT:
         self.session.add(entity)

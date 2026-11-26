@@ -1,17 +1,20 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from api.v1.docs import errors
 from api.v1.utils import (
     CreatedRangeSchema,
+    Limit,
+    Offset,
     SessionDep,
     get_created_range,
     get_principal,
     get_settings_dependency,
+    not_found,
 )
-from components.core.config import SettingsSchema, get_settings
+from components.core.config import SettingsSchema
 from components.core.exceptions import OrganizationRequiredError
 from components.core.schemas import Principal
 from components.datasets.exceptions import DatasetNotFoundError
@@ -38,17 +41,16 @@ from components.third_party.llm.service import LLMService
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
 
-Limit = Annotated[int, Query(ge=1, le=100)]
-Offset = Annotated[int, Query(ge=0)]
-
 
 def get_enqueue() -> EnqueueResults:
     """Overridable in tests so no broker is needed."""
     return submit_results
 
 
-def get_llm_service() -> LLMService:
-    return LLMService(get_settings())
+def get_llm_service(request: Request) -> LLMService:
+    """The application's single service (built in ``create_app``)."""
+    llm_service: LLMService = request.app.state.llm_service
+    return llm_service
 
 
 def get_experiment_service(
@@ -67,10 +69,6 @@ def get_experiment_service(
 
 ServiceDep = Annotated[ExperimentService, Depends(get_experiment_service)]
 PrincipalDep = Annotated[Principal, Depends(get_principal)]
-
-
-def _not_found() -> HTTPException:
-    return HTTPException(status.HTTP_404_NOT_FOUND, "Experiment not found")
 
 
 def _conflict(exc: InvalidTransitionError) -> HTTPException:
@@ -160,7 +158,7 @@ async def get_experiment(
     try:
         experiment, counts = await service.get(principal, experiment_id)
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
     return ExperimentDetailSchema(
         **ExperimentSchema.model_validate(experiment).model_dump(),
         status_counts=counts,
@@ -190,7 +188,7 @@ async def list_results(
             result_status.value if result_status else None,
         )
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
     return ExperimentResultPageSchema(
         items=[ExperimentResultSchema.model_validate(i) for i in items],
         total=total,
@@ -226,7 +224,7 @@ async def start_experiment(
     try:
         enqueued = await service.start(principal, experiment_id)
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
     except InvalidTransitionError as exc:
         raise _conflict(exc) from None
     except ExperimentQuotaError as exc:
@@ -246,7 +244,7 @@ async def cancel_experiment(
     try:
         experiment = await service.cancel(principal, experiment_id)
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
     except InvalidTransitionError as exc:
         raise _conflict(exc) from None
     return ExperimentSchema.model_validate(experiment)
@@ -266,7 +264,7 @@ async def retry_failed(
     try:
         enqueued = await service.retry_failed(principal, experiment_id)
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
     except InvalidTransitionError as exc:
         raise _conflict(exc) from None
     except ExperimentQuotaError as exc:

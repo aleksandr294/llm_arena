@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from admin import mount_admin
@@ -5,6 +8,9 @@ from api.metrics import MetricsMiddleware, metrics_endpoint
 from api.middleware import SecurityMiddleware
 from api.v1.router import api_v1_router
 from components.core.config import SettingsSchema, get_settings
+from components.core.database import dispose_engine
+from components.third_party.llm.service import LLMService
+from taskiq_app import shutdown_broker
 
 API_VERSION = "0.1.0"
 
@@ -83,10 +89,25 @@ OPENAPI_TAGS = [
 ]
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    yield
+    # Release what the process holds so a stop leaves no open connections.
+    # Nested so a failing step (for example the broker while RabbitMQ is
+    # down) does not skip the steps after it.
+    try:
+        await shutdown_broker()
+    finally:
+        try:
+            await app.state.llm_service.aclose()
+        finally:
+            await dispose_engine()
+
+
 def create_app(settings: SettingsSchema | None = None) -> FastAPI:
     """Build the application. Invalid settings (for example a weak admin
     secret) fail here, at startup."""
-    settings = settings or get_settings()
+    settings = settings if settings is not None else get_settings()
     docs = settings.api_docs_enabled
     app = FastAPI(
         title="LLM Arena",
@@ -97,7 +118,11 @@ def create_app(settings: SettingsSchema | None = None) -> FastAPI:
         redoc_url="/redoc" if docs else None,
         openapi_url="/openapi.json" if docs else None,
         swagger_ui_parameters={"persistAuthorization": True},
+        lifespan=_lifespan,
     )
+    # One service (and its provider HTTP clients) for the process lifetime;
+    # closed in the lifespan shutdown.
+    app.state.llm_service = LLMService(settings)
     app.include_router(api_v1_router)
     # Mounted last so it never shadows an API route; a no-op without
     # ADMIN_SECRET_KEY.
