@@ -76,3 +76,47 @@ def test_component_tasks_discovered_without_touching_broker(
     assert broker.find_task("probe.ping") is not None
     sys.modules.pop("components.probe.tasks", None)
     sys.modules.pop("components.probe", None)
+
+
+class _FakeBroker:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    async def startup(self) -> None:
+        self.events.append("startup")
+
+    async def shutdown(self) -> None:
+        self.events.append("shutdown")
+
+
+async def test_shutdown_after_a_publish_and_noop_when_never_started(
+    taskiq_app: object, monkeypatch: MonkeyPatch
+) -> None:
+    module = taskiq_app
+    fake = _FakeBroker()
+    monkeypatch.setattr(module, "broker", fake)
+    await module.shutdown_broker()  # type: ignore[attr-defined]
+    assert fake.events == []
+    await module.ensure_broker_started()  # type: ignore[attr-defined]
+    await module.ensure_broker_started()  # type: ignore[attr-defined]
+    await module.shutdown_broker()  # type: ignore[attr-defined]
+    await module.shutdown_broker()  # type: ignore[attr-defined]
+    assert fake.events == ["startup", "shutdown"]
+
+
+def test_broker_lock_is_not_shared_between_event_loops(
+    taskiq_app: object, monkeypatch: MonkeyPatch
+) -> None:
+    import asyncio
+
+    module = taskiq_app
+    fake = _FakeBroker()
+    monkeypatch.setattr(module, "broker", fake)
+
+    async def start_and_stop() -> None:
+        await module.ensure_broker_started()  # type: ignore[attr-defined]
+        await module.shutdown_broker()  # type: ignore[attr-defined]
+
+    asyncio.run(start_and_stop())
+    asyncio.run(start_and_stop())
+    assert fake.events == ["startup", "shutdown"] * 2

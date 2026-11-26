@@ -1,14 +1,21 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from api.v1.docs import errors
-from api.v1.utils import SessionDep, get_principal
+from api.v1.utils import (
+    Limit,
+    Offset,
+    SessionDep,
+    get_principal,
+    not_found,
+)
 from components.core.schemas import Principal
 from components.evaluation.dependencies import build_evaluation_service
 from components.evaluation.enums import OutcomeStatus
 from components.evaluation.schemas import (
+    EVALUATOR_ID_MAX,
     EvaluationEnqueueSchema,
     EvaluationPageSchema,
     EvaluationSummarySchema,
@@ -19,9 +26,6 @@ from components.experiments.exceptions import ExperimentNotFoundError
 from components.experiments.service import EnqueueResults
 
 router = APIRouter(prefix="/experiments", tags=["evaluations"])
-
-Limit = Annotated[int, Query(ge=1, le=100)]
-Offset = Annotated[int, Query(ge=0)]
 
 
 def get_enqueue() -> EnqueueResults:
@@ -35,10 +39,6 @@ def get_evaluation_service(session: SessionDep) -> EvaluationService:
 
 ServiceDep = Annotated[EvaluationService, Depends(get_evaluation_service)]
 PrincipalDep = Annotated[Principal, Depends(get_principal)]
-
-
-def _not_found() -> HTTPException:
-    return HTTPException(status.HTTP_404_NOT_FOUND, "Experiment not found")
 
 
 @router.post(
@@ -59,7 +59,7 @@ async def evaluate_experiment(
     try:
         result_ids, remaining = await service.backfill(principal, experiment_id)
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
     if result_ids:
         await enqueue(result_ids)
     return EvaluationEnqueueSchema(
@@ -81,7 +81,7 @@ async def evaluation_summary(
     try:
         return await service.summary(principal, experiment_id)
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
 
 
 @router.get(
@@ -96,7 +96,9 @@ async def list_evaluations(
     principal: PrincipalDep,
     limit: Limit = 50,
     offset: Offset = 0,
-    evaluator_id: str | None = None,
+    evaluator_id: Annotated[
+        str | None, Query(max_length=EVALUATOR_ID_MAX)
+    ] = None,
     outcome: Annotated[OutcomeStatus | None, Query(alias="status")] = None,
 ) -> EvaluationPageSchema:
     try:
@@ -109,7 +111,7 @@ async def list_evaluations(
             outcome.value if outcome else None,
         )
     except ExperimentNotFoundError:
-        raise _not_found() from None
+        raise not_found("Experiment not found") from None
     return EvaluationPageSchema(
         items=items,
         total=total,

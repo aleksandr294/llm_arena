@@ -28,6 +28,15 @@ _bearer = HTTPBearer(auto_error=False)
 SessionDep = Annotated[AsyncSession, Depends(get_session, scope="function")]
 
 
+Limit = Annotated[int, Query(ge=1, le=100)]
+# Large offsets make PostgreSQL scan and discard that many rows.
+Offset = Annotated[int, Query(ge=0, le=1_000_000)]
+
+
+def not_found(detail: str) -> HTTPException:
+    return HTTPException(status.HTTP_404_NOT_FOUND, detail)
+
+
 def get_settings_dependency() -> SettingsSchema:
     """Overridable in tests."""
     return get_settings()
