@@ -11,12 +11,13 @@ import io
 import json
 import logging
 import uuid
+from collections import defaultdict
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import ValidationError
-from sqlalchemy import Text, literal, select, tuple_
+from sqlalchemy import Select, Text, literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from components.core.database import SessionScope
@@ -24,8 +25,7 @@ from components.core.schemas import Principal
 from components.evaluation.models import EvaluationResult
 from components.evaluation.schemas import parse_evaluator_config
 from components.experiments.exceptions import ExperimentNotFoundError
-from components.experiments.models import ExperimentResult
-from components.experiments.repository import ExperimentRepository
+from components.experiments.models import Experiment, ExperimentResult
 from components.metrics.schemas import ComparisonSchema
 from components.metrics.service import MetricsService
 from components.metrics.utils import neutralize
@@ -35,6 +35,29 @@ logger = logging.getLogger(__name__)
 EXPORT_BATCH_SIZE = 500
 _R = ExperimentResult
 MetricsServiceFactory = Callable[[AsyncSession], MetricsService]
+
+
+class _ResultRecord(NamedTuple):
+    """One selected ``experiment_results`` row, in select order."""
+
+    id: uuid.UUID
+    case_position: int
+    provider: str
+    model: str
+    status: str
+    attempts: int
+    latency_ms: float | None
+    input_tokens: int | None
+    output_tokens: int | None
+    total_tokens: int | None
+    error_kind: str | None
+    response_truncated: bool
+    rendered_prompt: str | None
+    response_text: str | None
+
+
+# ``(case_position, provider, model, id)`` of the last row sent.
+_Cursor = tuple[int, str, str, uuid.UUID]
 
 
 @dataclass(frozen=True)
@@ -87,14 +110,14 @@ async def prepare_export(
     (injected by the endpoint); ``metrics_service`` builds the metrics
     collaborator for the session opened here."""
     async with scope() as session:
-        experiment = await ExperimentRepository(session).get_scoped(
-            experiment_id, principal
-        )
-        if experiment is None:
-            raise ExperimentNotFoundError(experiment_id)
+        # The metrics service call is scoped (it raises for a missing or
+        # out-of-scope experiment), so the plain load below is safe.
         comparison = await metrics_service(session).comparison(
             principal, experiment_id
         )
+        experiment = await session.get(Experiment, experiment_id)
+        if experiment is None:  # deleted between the two reads
+            raise ExperimentNotFoundError(experiment_id)
         header = {
             "experiment": {
                 "id": str(experiment.id),
@@ -124,7 +147,7 @@ async def iter_rows(
     """Batches ordered by ``(case_position, provider, model, id)``, resumed
     with a keyset so rows added meanwhile never shift the pages. Prompt and
     response text are selected only when ``include_text``."""
-    last: tuple[int, str, str, uuid.UUID] | None = None
+    last: _Cursor | None = None
     while True:
         async with scope() as session:
             batch, last = await _read_batch(
@@ -137,12 +160,9 @@ async def iter_rows(
             return
 
 
-async def _read_batch(
-    session: AsyncSession,
-    experiment_id: uuid.UUID,
-    include_text: bool,
-    after: tuple[int, str, str, uuid.UUID] | None,
-) -> tuple[list[ExportRow], tuple[int, str, str, uuid.UUID] | None]:
+def _batch_statement(
+    experiment_id: uuid.UUID, include_text: bool, after: _Cursor | None
+) -> Select[Any]:
     prompt = (
         _R.rendered_prompt
         if include_text
@@ -179,40 +199,50 @@ async def _read_batch(
             tuple_(_R.case_position, _R.provider, _R.model, _R.id)
             > tuple_(*after)
         )
-    rows = (await session.execute(stmt)).all()
+    return stmt  # type: ignore[return-value]
+
+
+async def _read_batch(
+    session: AsyncSession,
+    experiment_id: uuid.UUID,
+    include_text: bool,
+    after: _Cursor | None,
+) -> tuple[list[ExportRow], _Cursor | None]:
+    stmt = _batch_statement(experiment_id, include_text, after)
+    rows = [_ResultRecord(*r) for r in (await session.execute(stmt)).all()]
     if not rows:
         return [], after
-    evaluations: dict[uuid.UUID, dict[str, str]] = {}
+    evaluations: defaultdict[uuid.UUID, dict[str, str]] = defaultdict(dict)
     outcomes = await session.execute(
         select(
             EvaluationResult.experiment_result_id,
             EvaluationResult.evaluator_id,
             EvaluationResult.status,
-        ).where(EvaluationResult.experiment_result_id.in_([r[0] for r in rows]))
+        ).where(EvaluationResult.experiment_result_id.in_([r.id for r in rows]))
     )
     for result_id, evaluator_id, status in outcomes.all():
-        evaluations.setdefault(result_id, {})[evaluator_id] = status
+        evaluations[result_id][evaluator_id] = status
     batch = [
         ExportRow(
-            case_position=r[1],
-            provider=r[2],
-            model=r[3],
-            status=r[4],
-            attempts=r[5],
-            latency_ms=r[6],
-            input_tokens=r[7],
-            output_tokens=r[8],
-            total_tokens=r[9],
-            error_kind=r[10],
-            response_truncated=r[11],
-            evaluations=evaluations.get(r[0], {}),
-            rendered_prompt=r[12],
-            response_text=r[13],
+            case_position=r.case_position,
+            provider=r.provider,
+            model=r.model,
+            status=r.status,
+            attempts=r.attempts,
+            latency_ms=r.latency_ms,
+            input_tokens=r.input_tokens,
+            output_tokens=r.output_tokens,
+            total_tokens=r.total_tokens,
+            error_kind=r.error_kind,
+            response_truncated=r.response_truncated,
+            evaluations=evaluations.get(r.id, {}),
+            rendered_prompt=r.rendered_prompt,
+            response_text=r.response_text,
         )
         for r in rows
     ]
     tail = rows[-1]
-    return batch, (tail[1], tail[2], tail[3], tail[0])
+    return batch, (tail.case_position, tail.provider, tail.model, tail.id)
 
 
 def _json_row(row: ExportRow, include_text: bool) -> dict[str, Any]:
@@ -243,8 +273,9 @@ async def json_stream(
     scope: SessionScope, context: ExportContext, include_responses: bool
 ) -> AsyncIterator[str]:
     """A single JSON document: the header fields, then ``results`` written
-    batch by batch. A failure mid-stream ends the stream without the closing
-    brackets, so the truncated document does not parse."""
+    batch by batch. A failure mid-stream is logged (no row content) and
+    re-raised, so the server aborts the response instead of ending it as if it
+    were complete; the document is also left without its closing brackets."""
     count = 0
     try:
         head = json.dumps(context.header)
@@ -265,7 +296,7 @@ async def json_stream(
             count,
             type(exc).__name__,
         )
-        return
+        raise
     logger.info(
         "export done experiment_id=%s format=json rows=%d",
         context.experiment_id,
@@ -329,7 +360,9 @@ async def csv_stream(
     scope: SessionScope, context: ExportContext, include_responses: bool
 ) -> AsyncIterator[str]:
     """Header row, then one row per result. Text cells starting with a
-    formula character carry a leading single quote (documented alteration)."""
+    formula character carry a leading single quote (documented alteration). A
+    failure mid-stream is logged and re-raised so the response is aborted
+    rather than ending as a short but valid-looking CSV."""
     count = 0
     try:
         yield _render([csv_columns(context, include_responses)])
@@ -350,7 +383,7 @@ async def csv_stream(
             count,
             type(exc).__name__,
         )
-        return
+        raise
     logger.info(
         "export done experiment_id=%s format=csv rows=%d",
         context.experiment_id,

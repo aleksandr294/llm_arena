@@ -22,6 +22,7 @@ x-app-environment: &app-environment
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   LLM_MAX_CONCURRENCY: ${LLM_MAX_CONCURRENCY:-4}
+  LLM_MEASURE_TTFT: ${LLM_MEASURE_TTFT:-false}
   # Path inside the container; mount the file read-only (see README).
   PRICING_FILE: ${PRICING_FILE:-}
 

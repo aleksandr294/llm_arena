@@ -129,6 +129,9 @@ class CaseTargetResultSchema(BaseModel):
     output_tokens: int | None = None
     total_tokens: int | None = None
     error_kind: str | None = None
+    # The platform cut the stored response at its size limit; always set,
+    # whether or not responses are requested.
+    response_truncated: bool = False
     evaluations: list[CaseEvaluationSchema]
     # Only filled when responses are requested.
     response_text: str | None = None

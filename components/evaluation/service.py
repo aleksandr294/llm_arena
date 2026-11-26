@@ -22,8 +22,9 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from components.core.database import SessionScope
+from components.core.database import SessionScope, rollback
 from components.core.schemas import Principal
+from components.core.utils import backoff_delay
 from components.evaluation.enums import OutcomeStatus
 from components.evaluation.evaluators import EVALUATORS, build_evaluator
 from components.evaluation.judge import (
@@ -46,7 +47,6 @@ from components.evaluation.schemas import (
 from components.experiments.enums import ResultStatus
 from components.experiments.exceptions import ExperimentNotFoundError
 from components.experiments.repository import ExperimentRepository
-from components.experiments.utils import backoff_delay
 from components.third_party.llm.exceptions import LLMProviderError
 from components.third_party.llm.schemas import ModelTargetSchema
 from components.third_party.llm.service import LLMService
@@ -148,6 +148,11 @@ class EvaluationService:
     def _row(
         data: EvaluationInput, entry: EvaluatorEntry, outcome: EvaluationOutcome
     ) -> dict[str, Any]:
+        details = outcome.details
+        if data.response_truncated:
+            # Verdicts are unchanged; the flag explains a verdict that a cut
+            # response may have caused (e.g. json_valid on cut JSON).
+            details = {**details, "response_truncated": True}
         return {
             "experiment_result_id": data.result_id,
             "experiment_id": data.experiment_id,
@@ -155,7 +160,7 @@ class EvaluationService:
             "evaluator_type": entry.type,
             "evaluator_version": _evaluator_version(entry),
             "status": outcome.status.value,
-            "details": outcome.details,
+            "details": details,
         }
 
     @staticmethod
@@ -327,7 +332,7 @@ class EvaluationService:
         # Read-only unit: end its transaction so the connection goes back to
         # the pool before the caller publishes to the broker. Not a commit;
         # the entry point's final commit on an idle session is a no-op.
-        await session.rollback()
+        await rollback(session)
         return ids, max(total - len(ids), 0)
 
     async def list_evaluations(

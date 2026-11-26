@@ -219,6 +219,7 @@ class MetricsService:
                     output_tokens=row.output_tokens,
                     total_tokens=row.total_tokens,
                     error_kind=row.error_kind,
+                    response_truncated=row.response_truncated,
                     evaluations=evaluations.get(row.result_id, []),
                     response_text=row.response_text,
                 )

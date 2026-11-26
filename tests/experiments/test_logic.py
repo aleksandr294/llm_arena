@@ -2,7 +2,6 @@ import pytest
 
 from components.experiments.enums import ExperimentStatus
 from components.experiments.utils import (
-    backoff_delay,
     derive_final_status,
     render_prompt,
 )
@@ -62,20 +61,3 @@ def test_derive_final_status(
     counts: dict[str, int], cancel: bool, expected: ExperimentStatus | None
 ) -> None:
     assert derive_final_status(counts, cancel) == expected
-
-
-def test_backoff_is_exponential_and_capped() -> None:
-    assert [backoff_delay(n) for n in range(7)] == [1, 2, 4, 8, 16, 30, 30]
-
-
-def test_backoff_honors_retry_after_up_to_cap() -> None:
-    assert backoff_delay(0, retry_after_seconds=7.5) == 7.5
-    assert backoff_delay(0, retry_after_seconds=120) == 30
-    assert backoff_delay(3, retry_after_seconds=0) == 0
-    assert backoff_delay(0, retry_after_seconds=-5) == 0
-
-
-def test_backoff_jitter_added_but_total_capped() -> None:
-    assert backoff_delay(1, jitter_seconds=0.25) == 2.25
-    assert backoff_delay(5, jitter_seconds=3) == 30
-    assert backoff_delay(0, retry_after_seconds=5, jitter_seconds=0.5) == 5.5

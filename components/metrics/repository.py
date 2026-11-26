@@ -69,6 +69,7 @@ class CaseResultRow:
     output_tokens: int | None
     total_tokens: int | None
     error_kind: str | None
+    response_truncated: bool
     response_text: str | None
 
 
@@ -252,6 +253,7 @@ class MetricsRepository:
                 _R.output_tokens,
                 _R.total_tokens,
                 _R.error_kind,
+                _R.response_truncated,
                 response,
             )
             .where(
@@ -262,18 +264,19 @@ class MetricsRepository:
         )
         return [
             CaseResultRow(
-                result_id=r[0],
-                case_position=r[1],
-                provider=r[2],
-                model=r[3],
-                status=r[4],
-                attempts=r[5],
-                latency_ms=r[6],
-                input_tokens=r[7],
-                output_tokens=r[8],
-                total_tokens=r[9],
-                error_kind=r[10],
-                response_text=r[11],
+                result_id=r.id,
+                case_position=r.case_position,
+                provider=r.provider,
+                model=r.model,
+                status=r.status,
+                attempts=r.attempts,
+                latency_ms=r.latency_ms,
+                input_tokens=r.input_tokens,
+                output_tokens=r.output_tokens,
+                total_tokens=r.total_tokens,
+                error_kind=r.error_kind,
+                response_truncated=r.response_truncated,
+                response_text=r.response_text,
             )
             for r in rows.all()
         ]

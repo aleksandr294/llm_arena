@@ -18,6 +18,7 @@ from components.core.database import (
     create_engine,
     get_session,
     on_commit,
+    rollback,
 )
 from components.core.repository import BaseRepository
 from tests.helpers import checked_database_url
@@ -94,6 +95,24 @@ async def test_unit_of_work_rolls_back_on_error(
     with pytest.raises(RuntimeError):
         await gen.athrow(RuntimeError("boom"))
 
+    assert await _count(factory) == 0
+
+
+async def test_rollback_drops_pending_on_commit_callbacks(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    calls: list[str] = []
+
+    async def callback() -> None:
+        calls.append("ran")
+
+    async with factory() as session:
+        await ProbeRepository(session).add(ProbeModel(name="lost"))
+        on_commit(session, callback)
+        await rollback(session)
+        await commit(session)
+
+    assert calls == []
     assert await _count(factory) == 0
 
 

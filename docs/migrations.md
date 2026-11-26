@@ -40,8 +40,9 @@ pulling a change that adds a revision.
 | `0009` | Index `ix_experiment_results_export_order` (tech-debt-experiment-pipeline) | Drops the index |
 | `0010` | Indexes `ix_experiments_dataset_id` and `ix_experiment_results_test_case_id` | Drops the indexes; no data change |
 
-`0008` and `0009` arrive with their own changes; a checkout without them
-goes from `0007` straight to `0010`. Creating the `0010` indexes takes a
+`0009` follows `0010` (`0010` reached `main` first); `0008` arrives with
+its own change. Revision ids are labels, not the order: `alembic history`
+shows the chain. Creating the `0010` indexes takes a
 short write lock on `experiments` and `experiment_results`: apply it between
 experiment runs.
 
@@ -64,3 +65,9 @@ the schema at head matches the models including column types
 
 Register each component's `models` module in `migrations/env.py` so
 autogenerate sees its tables. The baseline revision `0001` is empty.
+
+Revision `0009` adds the index `ix_experiment_results_export_order` on
+`experiment_results (experiment_id, case_position, provider, model, id)`
+that backs the export ordering. It changes no data. `CREATE INDEX` blocks
+writes to `experiment_results` while it runs, so migrate between experiment
+runs, then restart the API and worker. `alembic downgrade 0007` drops it.

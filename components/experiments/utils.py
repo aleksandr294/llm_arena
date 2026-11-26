@@ -1,4 +1,4 @@
-"""Pure helpers: prompt rendering, final-status derivation and backoff.
+"""Pure helpers: prompt rendering and final-status derivation.
 
 Kept free of I/O so they are unit-testable without a database or a clock.
 """
@@ -20,8 +20,6 @@ EXPECTED_OUTPUT_TOKEN = "{expected_output}"  # noqa: S105 - prompt template plac
 # input and expected output.
 MAX_RENDERED_PROMPT_CHARS = 200_000
 MAX_TOTAL_RENDERED_CHARS = 100_000_000
-BACKOFF_CAP_SECONDS = 30.0
-BACKOFF_BASE_SECONDS = 1.0
 
 _TOKEN_PATTERN = re.compile(
     re.escape(INPUT_TOKEN) + "|" + re.escape(EXPECTED_OUTPUT_TOKEN)
@@ -82,22 +80,3 @@ def derive_final_status(
     if succeeded == 0:
         return ExperimentStatus.FAILED
     return ExperimentStatus.PARTIALLY_FAILED
-
-
-def backoff_delay(
-    retry_number: int,
-    retry_after_seconds: float | None = None,
-    jitter_seconds: float = 0.0,
-    base_seconds: float = BACKOFF_BASE_SECONDS,
-    cap_seconds: float = BACKOFF_CAP_SECONDS,
-) -> float:
-    """Seconds to sleep before retry ``retry_number`` (0 for the first retry).
-
-    Exponential ``base * 2**n``, or the provider's retry-after when given;
-    plus caller-supplied jitter, and the total never exceeds the cap.
-    """
-    if retry_after_seconds is not None:
-        delay = max(0.0, retry_after_seconds)
-    else:
-        delay = base_seconds * 2 ** max(0, retry_number)
-    return min(cap_seconds, delay + max(0.0, jitter_seconds))

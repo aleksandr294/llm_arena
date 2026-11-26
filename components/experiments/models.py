@@ -88,6 +88,15 @@ class ExperimentResult(Base):
         Index(
             "ix_experiment_results_experiment_status", "experiment_id", "status"
         ),
+        # Backs the export keyset order (see components/metrics/export.py).
+        Index(
+            "ix_experiment_results_export_order",
+            "experiment_id",
+            "case_position",
+            "provider",
+            "model",
+            "id",
+        ),
         Index("ix_experiment_results_test_case_id", "test_case_id"),
     )
 
@@ -109,7 +118,8 @@ class ExperimentResult(Base):
     rendered_prompt: Mapped[str] = mapped_column(Text)
     attempts: Mapped[int] = mapped_column(default=0, server_default="0")
     response_text: Mapped[str | None] = mapped_column(Text, default=None)
-    # True when response_text was cut at MAX_STORED_RESPONSE_CHARS.
+    # True when the platform cut response_text at the configured storage
+    # limit (the provider's own finish_reason is separate).
     response_truncated: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=false()
     )
