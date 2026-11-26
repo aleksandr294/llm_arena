@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
+from tests.helpers import TEST_JWT_SECRET, make_settings
+
 if TYPE_CHECKING:
     # Type-only: the panel and admin helpers must not load at suite start
     # (fastadmin reads its environment at import time).
@@ -20,10 +22,31 @@ if TYPE_CHECKING:
     from tests.admin.helpers import World
     from tests.admin.panel_process import Panel
 
-# Test-only signing key; never used outside the test process.
-TEST_JWT_SECRET = "test-only-jwt-signing-key-0123456789abcdef"
 # Some modules read settings at import (collection) time, before fixtures.
 os.environ.setdefault("JWT_SECRET_KEY", TEST_JWT_SECRET)
+
+
+# A test that uses any of these needs PostgreSQL or the broker, so it is
+# an integration test. ``pytest -m "not integration"`` needs no services.
+INTEGRATION_FIXTURES = frozenset(
+    {"engine", "session_factory", "api", "actors", "world", "scratch_url"}
+)
+# Modules that open their own engine on ``DATABASE_URL`` must go through
+# this helper (docs/testing.md), so importing it marks the module's tests.
+DATABASE_URL_HELPER = "checked_database_url"
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark tests that need a database or broker as ``integration``."""
+    for item in items:
+        # ``fixturenames`` is the transitive closure, so fixtures built on
+        # these (``emails``, ``panel``) are covered too.
+        names = getattr(item, "fixturenames", ())
+        module = getattr(item, "module", None)
+        if INTEGRATION_FIXTURES.intersection(names) or hasattr(
+            module, DATABASE_URL_HELPER
+        ):
+            item.add_marker(pytest.mark.integration)
 
 
 @pytest.fixture(autouse=True)
@@ -79,21 +102,39 @@ async def _worker_schema() -> AsyncIterator[str | None]:
 
 
 @pytest.fixture
+def scratch_url(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """URL of a freshly created scratch database (dropped afterwards), also
+    exported as ``DATABASE_URL`` so Alembic's ``env.py`` migrates it."""
+    import uuid
+
+    from sqlalchemy import make_url
+
+    from components.core import config as app_config
+    from tests.helpers import checked_database_url
+    from tests.migrations.helpers import admin_sql
+
+    name = f"mig_{uuid.uuid4().hex[:12]}"
+    admin_sql(f'CREATE DATABASE "{name}"')
+    url = (
+        make_url(checked_database_url())
+        .set(database=name)
+        .render_as_string(hide_password=False)
+    )
+    monkeypatch.setenv("DATABASE_URL", url)
+    app_config.get_settings.cache_clear()
+    yield url
+    app_config.get_settings.cache_clear()
+    monkeypatch.undo()
+    admin_sql(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+@pytest.fixture
 def app() -> FastAPI:
     from api.app import create_app
-    from components.core.config import SettingsSchema
 
     # Explicit settings so unit tests need no DATABASE_URL in the environment;
     # the placeholders are never connected to.
-    return create_app(
-        SettingsSchema(
-            database_url="postgresql+asyncpg://unused/unused",
-            rabbitmq_url="amqp://unused/",
-            jwt_secret_key=TEST_JWT_SECRET,
-            admin_secret_key=None,
-            _env_file=None,
-        )
-    )
+    return create_app(make_settings())
 
 
 @pytest.fixture
@@ -107,13 +148,7 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 @pytest.fixture
 def settings() -> "SettingsSchema":
     """Settings with placeholder URLs; nothing connects to them."""
-    from components.core.config import SettingsSchema
-
-    return SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-        jwt_secret_key=TEST_JWT_SECRET,
-    )
+    return make_settings()
 
 
 @pytest.fixture

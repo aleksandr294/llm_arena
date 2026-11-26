@@ -50,6 +50,14 @@ class UserRepository(BaseRepository[User]):
         )
         return result.first() is not None
 
+    async def count_by_organization(self, organization_id: uuid.UUID) -> int:
+        total = await self.session.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(User.organization_id == organization_id)
+        )
+        return total or 0
+
     async def list_page(
         self,
         limit: int,

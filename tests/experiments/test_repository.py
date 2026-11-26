@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from components.datasets.models import Dataset, TestCase
@@ -17,8 +17,6 @@ from components.experiments.repository import (
     ExperimentResultRepository,
 )
 from tests.access import ROOT, seed_organization
-
-pytestmark = pytest.mark.integration
 
 Factory = async_sessionmaker[AsyncSession]
 
@@ -330,7 +328,7 @@ async def test_get_for_update_blocks_second_locker(
         )
         assert locked is not None
         await second.execute(text("SET lock_timeout = '300ms'"))
-        with pytest.raises(Exception, match="lock"):
+        with pytest.raises(DBAPIError, match="lock"):
             await ExperimentRepository(second).get_for_update_unscoped(exp_id)
         await second.rollback()
         await first.commit()

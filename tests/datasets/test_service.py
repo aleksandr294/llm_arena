@@ -20,10 +20,8 @@ from components.datasets.schemas import (
     TestCaseCreateSchema,
 )
 from components.datasets.service import DatasetService
-from conftest import TEST_JWT_SECRET
 from tests.access import Actors
-
-pytestmark = pytest.mark.integration
+from tests.helpers import TEST_JWT_SECRET
 
 
 def _service(session: AsyncSession, **overrides: Any) -> DatasetService:

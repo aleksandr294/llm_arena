@@ -16,17 +16,17 @@ from components.third_party.llm.schemas import (
     ModelTargetSchema,
 )
 from components.third_party.llm.service import LLMService
+from tests.helpers import make_settings
 
 
 def _settings(**overrides: Any) -> SettingsSchema:
-    values: dict[str, Any] = {
-        "database_url": "postgresql+asyncpg://x",
-        "rabbitmq_url": "amqp://x",
-        "openai_api_key": "sk-openai",
-        "anthropic_api_key": "sk-anthropic",
-        **overrides,
-    }
-    return SettingsSchema(_env_file=None, **values)
+    return make_settings(
+        **{
+            "openai_api_key": "sk-openai",
+            "anthropic_api_key": "sk-anthropic",
+            **overrides,
+        }
+    )
 
 
 class FakeProvider:
@@ -266,6 +266,14 @@ def test_adapter_is_cached_per_instance_not_across_instances() -> None:
         one._providers[ProviderName.OPENAI]
         is not two._providers[ProviderName.OPENAI]
     )
+
+
+@pytest.mark.parametrize("flag", [False, True])
+def test_measure_ttft_setting_reaches_both_adapters(flag: bool) -> None:
+    service = LLMService(_settings(llm_measure_ttft=flag))
+    for name in (ProviderName.OPENAI, ProviderName.ANTHROPIC):
+        service.ensure_provider_ready(name)
+        assert service._providers[name]._measure_ttft is flag  # type: ignore[attr-defined]
 
 
 async def test_aclose_closes_the_created_adapters_only() -> None:

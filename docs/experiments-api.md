@@ -81,14 +81,19 @@ most 10 000 results (cases times targets) per experiment, `max_attempts`
   lease only covers the model calls and backoff, never the wait for a slot.
   A delivery it skips is logged with the result id and the reason
   (`finished`, `owned` or `not found`).
-- A retryable provider error (timeout, rate limit, server error) is retried
-  inside the task with exponential backoff (capped at 30 seconds) up to
-  `max_attempts`; other errors fail immediately. A provider `Retry-After` is
-  honored up to 120 seconds (jitter is added after the cap); a larger one is
-  not waited for and the result fails with `rate_limit`. Attempts are counted
-  across reclaims of the same result, so a reclaimed result never exceeds
-  `max_attempts` requests in one run (one already at the limit makes one
-  request and no retries).
+- A retryable provider error (`timeout`, `rate_limit`, `server_error`,
+  `connection`) is retried inside the task with exponential backoff (capped
+  at 30 seconds) up to `max_attempts`; other errors (`authentication`,
+  `invalid_request`, `malformed_response`, `unknown`) fail immediately. Rows
+  stored before `connection` existed keep `unknown` for network failures. A
+  provider `Retry-After` is honored up to 120 seconds (jitter is added after
+  the cap); a larger one is not waited for and the result fails with
+  `rate_limit`. Attempts are counted across reclaims of the same result, so a
+  reclaimed result never exceeds `max_attempts` requests in one run (one
+  already at the limit makes one request and no retries).
+- A `malformed_response` for an empty completion keeps the provider's finish
+  reason and token usage when reported (a reasoning model that runs out of
+  tokens shows `length` and its counts).
 - `error_kind` and a generic `error_message` are stored; provider error
   text, prompts and API keys are never logged or stored in error fields.
   Kinds that the platform itself sets: `configuration` (provider not
@@ -96,8 +101,9 @@ most 10 000 results (cases times targets) per experiment, `max_attempts`
   unusable after the claim), `interrupted` (the worker was cancelled before
   the outcome was stored; retry it with `retry-failed`), `internal`
   (unexpected error, or the outcome could not be stored). The other kinds are
-  the normalized provider errors (`timeout`, `rate_limit`, `authentication`,
-  `invalid_request`, `server_error`, `malformed_response`, `unknown`).
+  the normalized provider errors (`timeout`, `rate_limit`, `connection`,
+  `authentication`, `invalid_request`, `server_error`, `malformed_response`,
+  `unknown`).
 - Provider text is made storable first: NUL bytes are dropped and unpaired
   surrogate characters become U+FFFD. If both the outcome write and the
   fallback failure write fail, the task fails (and is redelivered) and the

@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from api.app import create_app
 from components.core.config import SettingsSchema
-from conftest import TEST_JWT_SECRET
+from tests.helpers import make_settings
 
 PUBLIC: frozenset[tuple[str, str]] = frozenset(
     {
@@ -26,14 +26,7 @@ HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 
 
 def _settings(**overrides: Any) -> SettingsSchema:
-    return SettingsSchema(
-        database_url="postgresql+asyncpg://unused/unused",
-        rabbitmq_url="amqp://unused/",
-        jwt_secret_key=TEST_JWT_SECRET,
-        admin_secret_key=None,
-        _env_file=None,
-        **overrides,
-    )
+    return make_settings(**overrides)
 
 
 def _operations(app: FastAPI) -> dict[tuple[str, str], dict[str, Any]]:

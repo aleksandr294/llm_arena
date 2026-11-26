@@ -1,8 +1,13 @@
-"""The destructive-test guard (no database needed)."""
+"""The destructive-test guard (no database needed).
+
+The helper is used through its module, not imported by name: a module that
+imports ``checked_database_url`` is marked ``integration`` at collection.
+"""
 
 import pytest
 
-from tests.helpers import checked_database_url, database_name_problem
+from tests import helpers
+from tests.helpers import database_name_problem
 
 BASE = "postgresql+asyncpg://user:secret-pw@localhost:5432/"
 
@@ -32,11 +37,11 @@ def test_checked_url_fails_the_test_for_a_dev_database(
 ) -> None:
     monkeypatch.setenv("DATABASE_URL", BASE + "llm_arena")
     with pytest.raises(pytest.fail.Exception, match="must contain 'test'"):
-        checked_database_url()
+        helpers.checked_database_url()
 
 
 def test_checked_url_returns_a_test_database_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DATABASE_URL", BASE + "llm_arena_test_audit")
-    assert checked_database_url() == BASE + "llm_arena_test_audit"
+    assert helpers.checked_database_url() == BASE + "llm_arena_test_audit"

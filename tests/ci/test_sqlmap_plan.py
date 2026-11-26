@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from conftest import TEST_JWT_SECRET
+from tests.helpers import TEST_JWT_SECRET
 from tests.security.helpers import CORPUS, MARK, huge_cases
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "sqlmap_plan.py"
@@ -252,10 +252,9 @@ def test_real_app_schema_is_planned(tmp_path: Path) -> None:
     for key, value in env.items():
         os.environ.setdefault(key, value)
     from api.app import create_app
-    from components.core.config import SettingsSchema
+    from tests.helpers import make_settings
 
-    settings = SettingsSchema(
-        _env_file=None,
+    settings = make_settings(
         database_url=env["DATABASE_URL"],
         rabbitmq_url=env["RABBITMQ_URL"],
         jwt_secret_key=TEST_JWT_SECRET,

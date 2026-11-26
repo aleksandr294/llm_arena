@@ -257,7 +257,6 @@ def commit_log(monkeypatch: pytest.MonkeyPatch) -> _CommitLog:
     return log
 
 
-@pytest.mark.integration
 async def test_write_endpoint_commits_before_the_response(
     app: FastAPI, actors: Actors, commit_log: _CommitLog
 ) -> None:
@@ -277,7 +276,6 @@ async def test_write_endpoint_commits_before_the_response(
     assert events.index("commit") < events.index("response.start")
 
 
-@pytest.mark.integration
 async def test_failed_commit_on_a_write_endpoint_is_a_500(
     app: FastAPI,
     actors: Actors,
@@ -308,7 +306,6 @@ async def test_failed_commit_on_a_write_endpoint_is_a_500(
         assert (await session.scalars(select(Dataset))).all() == []
 
 
-@pytest.mark.integration
 async def test_failed_enqueue_is_an_error_but_data_is_committed(
     app: FastAPI,
     actors: Actors,
@@ -353,7 +350,6 @@ async def test_failed_enqueue_is_an_error_but_data_is_committed(
     assert len(enqueued.flat) == 3
 
 
-@pytest.mark.integration
 async def test_start_commits_once_and_enqueues_after_the_commit(
     session_factory: Factory,
     actors: Actors,
@@ -397,7 +393,6 @@ async def _count_commits(
     return log.commits
 
 
-@pytest.mark.integration
 async def test_one_commit_per_write_operation(
     session_factory: Factory,
     actors: Actors,
@@ -459,7 +454,6 @@ async def test_one_commit_per_write_operation(
     assert superadmin.role is Role.SUPERADMIN
 
 
-@pytest.mark.integration
 async def test_refresh_reuse_persists_the_revocation_then_rejects(
     session_factory: Factory,
     actors: Actors,
@@ -491,7 +485,6 @@ async def test_refresh_reuse_persists_the_revocation_then_rejects(
         assert rows and all(row.revoked_at is not None for row in rows)
 
 
-@pytest.mark.integration
 async def test_organization_service_sees_no_commit_without_a_scope(
     session_factory: Factory,
 ) -> None:

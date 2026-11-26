@@ -2,8 +2,9 @@
 estimated cost. Labels are provider and model (and currency for cost) only
 — never a prompt, response, request id or anything else of unbounded
 cardinality. Generation speed is derived from total call latency, not a
-first-token timestamp (the provider adapters are not streaming); it is
-named and documented as an approximation, never presented as TTFT.
+first-token timestamp; it is named and documented as an approximation,
+never presented as TTFT. True time to first token is a separate histogram,
+recorded only when the adapters stream (LLM_MEASURE_TTFT).
 """
 
 from decimal import Decimal
@@ -40,9 +41,19 @@ MODEL_CALL_LATENCY_SECONDS = Histogram(
 MODEL_CALL_GENERATION_SPEED_TOKENS_PER_SECOND = Histogram(
     "model_call_generation_speed_tokens_per_second",
     "Approximate generation speed (output tokens / total call latency) by "
-    "provider and model. Not a time-to-first-token measurement: the "
-    "provider adapters are not streaming.",
+    "provider and model. Not a time-to-first-token measurement; see "
+    "model_call_ttft_seconds.",
     ("provider", "model"),
+    registry=WORKER_METRICS_REGISTRY,
+)
+_TTFT_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, float("inf"))
+
+MODEL_CALL_TTFT_SECONDS = Histogram(
+    "model_call_ttft_seconds",
+    "Time to first text chunk by provider and model, measured by streaming "
+    "(LLM_MEASURE_TTFT). Not recorded when streaming is off.",
+    ("provider", "model"),
+    buckets=_TTFT_BUCKETS,
     registry=WORKER_METRICS_REGISTRY,
 )
 MODEL_CALL_COST_ESTIMATE_TOTAL = Counter(
@@ -58,6 +69,14 @@ MODEL_CALL_COST_ESTIMATE_TOTAL = Counter(
 def record_latency(provider: str, model: str, latency_ms: float) -> None:
     MODEL_CALL_LATENCY_SECONDS.labels(provider=provider, model=model).observe(
         latency_ms / 1000
+    )
+
+
+def record_ttft(provider: str, model: str, ttft_ms: float | None) -> None:
+    if ttft_ms is None:
+        return
+    MODEL_CALL_TTFT_SECONDS.labels(provider=provider, model=model).observe(
+        ttft_ms / 1000
     )
 
 

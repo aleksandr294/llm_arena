@@ -17,8 +17,6 @@ from tests.auth.helpers import (
     seed_user,
 )
 
-pytestmark = pytest.mark.integration
-
 URL = "/api/v1/users"
 NEW_PASSWORD = "another long password"
 

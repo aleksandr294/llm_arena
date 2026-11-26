@@ -1,23 +1,15 @@
 """Migration test against a scratch database: needs PostgreSQL
 (``DATABASE_URL``) and permission to create databases."""
 
-import pytest
 from alembic import command
 
-from tests.migrations.test_0006_resource_ownership import (
-    _config,
-    _drift,
-    _run,
-    scratch_url,  # noqa: F401  (fixture)
-)
-
-pytestmark = pytest.mark.integration
+from tests.migrations.helpers import alembic_config, run_sql, schema_drift
 
 _INDEX = "ix_experiment_results_export_order"
 
 
 def _index_columns(url: str) -> list[str]:
-    rows = _run(
+    rows = run_sql(
         url,
         "SELECT a.attname FROM pg_index i "
         "JOIN pg_class c ON c.oid = i.indexrelid "
@@ -32,12 +24,13 @@ def _index_columns(url: str) -> list[str]:
 
 
 def test_upgrade_creates_the_export_index_and_downgrades(
-    scratch_url: str,  # noqa: F811
+    scratch_url: str,
 ) -> None:
-    command.upgrade(_config(), "0007")
+    # 0009 follows 0010 (see the revision's docstring).
+    command.upgrade(alembic_config(), "0010")
     assert _index_columns(scratch_url) == []
 
-    command.upgrade(_config(), "0009")
+    command.upgrade(alembic_config(), "0009")
 
     assert _index_columns(scratch_url) == [
         "experiment_id",
@@ -46,7 +39,7 @@ def test_upgrade_creates_the_export_index_and_downgrades(
         "model",
         "id",
     ]
-    assert _drift(scratch_url) == []
+    assert schema_drift(scratch_url) == []
 
-    command.downgrade(_config(), "0007")
+    command.downgrade(alembic_config(), "0010")
     assert _index_columns(scratch_url) == []

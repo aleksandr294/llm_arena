@@ -25,8 +25,6 @@ from tests.access import ROOT, seed_principal
 from tests.metrics.helpers import Row, seed
 from tests.security.helpers import MARK, SAMPLE_IDS, SAMPLES
 
-pytestmark = pytest.mark.integration
-
 Factory = async_sessionmaker[AsyncSession]
 
 
