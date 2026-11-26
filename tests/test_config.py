@@ -210,7 +210,7 @@ def test_admin_settings_defaults(monkeypatch: MonkeyPatch) -> None:
     assert settings.admin_secret_key is None
     assert settings.admin_session_cookie_secure is True
     assert settings.admin_session_ttl_seconds == 28800
-    assert settings.api_docs_enabled is True
+    assert settings.api_docs_enabled is False
 
 
 @pytest.mark.parametrize("ttl", ["0", "59", "-1"])
@@ -293,3 +293,98 @@ def test_admin_cookie_and_docs_flags_parse(monkeypatch: MonkeyPatch) -> None:
 
     assert settings.admin_session_cookie_secure is False
     assert settings.api_docs_enabled is False
+
+
+def test_health_timeout_must_be_positive(monkeypatch: MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv("HEALTH_CHECK_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    assert "health_check_timeout_seconds" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("name", "ceiling"),
+    [
+        ("JWT_ACCESS_TTL_SECONDS", 86_400),
+        ("JWT_REFRESH_TTL_SECONDS", 7_776_000),
+    ],
+)
+def test_jwt_ttl_ceilings(
+    monkeypatch: MonkeyPatch, name: str, ceiling: int
+) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv(name, str(ceiling))
+    SettingsSchema(_env_file=None)
+    monkeypatch.setenv(name, str(ceiling + 1))
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    assert name.lower() in str(exc.value)
+
+
+def test_database_url_must_use_asyncpg_without_echo(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _base_env(monkeypatch)
+    sync_url = "postgresql://u:s3cret-sync@localhost/db"
+    monkeypatch.setenv("DATABASE_URL", sync_url)
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    message = str(exc.value)
+    assert "database_url" in message
+    assert "s3cret-sync" not in message
+
+
+@pytest.mark.parametrize("url", ["http://u:s3cret-http@h/", "redis://h/"])
+def test_rabbitmq_url_must_be_amqp_without_echo(
+    monkeypatch: MonkeyPatch, url: str
+) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv("RABBITMQ_URL", url)
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    message = str(exc.value)
+    assert "rabbitmq_url" in message
+    assert "s3cret-http" not in message
+
+
+def test_amqps_url_is_accepted(monkeypatch: MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv("RABBITMQ_URL", "amqps://u:p@h/")
+
+    SettingsSchema(_env_file=None)
+
+
+@pytest.mark.parametrize("name", ["JWT_SECRET_KEY", "ADMIN_SECRET_KEY"])
+def test_low_entropy_secret_rejected_without_echo(
+    monkeypatch: MonkeyPatch, name: str
+) -> None:
+    _base_env(monkeypatch)
+    secret = "ab" * 20
+    monkeypatch.setenv(name, secret)
+
+    with pytest.raises(ValidationError) as exc:
+        SettingsSchema(_env_file=None)
+
+    message = str(exc.value)
+    assert name.lower() in message
+    assert secret not in message
+
+
+def test_max_cases_per_dataset_default_and_minimum(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.delenv("MAX_CASES_PER_DATASET", raising=False)
+    assert SettingsSchema(_env_file=None).max_cases_per_dataset == 10_000
+    monkeypatch.setenv("MAX_CASES_PER_DATASET", "0")
+    with pytest.raises(ValidationError):
+        SettingsSchema(_env_file=None)

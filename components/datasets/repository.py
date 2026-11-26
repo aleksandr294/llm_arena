@@ -15,7 +15,7 @@ _USE_SCOPED = "use the scoped method"
 
 class DatasetRepository(BaseRepository[Dataset]):
     """Methods take a ``Principal`` and treat out-of-scope rows as missing.
-    The inherited unscoped ``get``/``delete``/``list`` are disabled so a
+    The inherited unscoped ``get``/``delete`` are disabled so a
     request path cannot bypass ownership by accident."""
 
     model = Dataset
@@ -24,11 +24,6 @@ class DatasetRepository(BaseRepository[Dataset]):
         raise NotImplementedError(_USE_SCOPED)
 
     async def delete(self, entity: Dataset) -> None:
-        raise NotImplementedError(_USE_SCOPED)
-
-    async def list(
-        self, limit: int = 100, offset: int = 0
-    ) -> Sequence[Dataset]:
         raise NotImplementedError(_USE_SCOPED)
 
     async def list_page(
