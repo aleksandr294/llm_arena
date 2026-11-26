@@ -12,6 +12,8 @@ mypy
 poetry run ruff check --select S components api admin cli.py main.py \
   taskiq_app.py migrations migrations/versions/*.py scripts   # security rules, must be clean
 poetry run pip-audit      # needs network; see docs/security.md
+# The security rules are Ruff's S rules (the command above); Bandit was
+# replaced by them, see docs/security.md
 pre-commit run --all-files
 ```
 
